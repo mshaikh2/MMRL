@@ -20,7 +20,7 @@ import dateutil.tz
 import argparse
 import numpy as np
 from PIL import Image
-
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -33,7 +33,7 @@ dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
 sys.path.append(dir_path)
 
 
-UPDATE_INTERVAL = 200
+UPDATE_INTERVAL = 100
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a DAMSM network')
@@ -143,11 +143,10 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
             
 #             print(imgs[-1].cpu().shape, captions.shape, len(attn_maps),attn_maps[-1].shape, att_sze)
             img_set, _ = \
-                build_super_images(imgs[-1].cpu(), captions,
-                                   ixtoword, attn_maps, att_sze)
+                build_super_images(imgs[-1].cpu(), captions, ixtoword, attn_maps, att_sze)
             if img_set is not None:
                 im = Image.fromarray(img_set)
-                fullpath = '{0}/attention_maps_e{1}_s{2}.png' % (image_dir,epoch, step)
+                fullpath = '{0}/attention_maps_e{1}_s{2}.png'.format(image_dir,epoch, step)
                 im.save(fullpath)
     return count
 
@@ -217,6 +216,9 @@ def build_models():
 
 
 if __name__ == "__main__":
+    wlosses = []
+    slosses = []
+    
     args = parse_args()
     if args.cfg_file is not None:
         cfg_from_file(args.cfg_file)
@@ -244,13 +246,14 @@ if __name__ == "__main__":
     ##########################################################################
     now = datetime.datetime.now(dateutil.tz.tzlocal())
     timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
-    output_dir = '../output/%s_%s_%s' % \
-        (cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
+    output_dir = '../output/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
 
     model_dir = os.path.join(output_dir, 'Model')
     image_dir = os.path.join(output_dir, 'Image')
+    metrics_dir = os.path.join(output_dir, 'Metrics')
     mkdir_p(model_dir)
     mkdir_p(image_dir)
+    mkdir_p(metrics_dir)
 
     torch.cuda.set_device(cfg.GPU_ID)
     cudnn.benchmark = True
@@ -301,6 +304,8 @@ if __name__ == "__main__":
             if len(dataloader_val) > 0:
                 s_loss, w_loss = evaluate(dataloader_val, image_encoder,
                                           text_encoder, batch_size)
+                wlosses.append(w_loss)
+                slosses.append(s_loss)
                 print('| end epoch {:3d} | valid loss '
                       '{:5.2f} {:5.2f} | lr {:.5f}|'
                       .format(epoch, s_loss, w_loss, lr))
@@ -315,6 +320,10 @@ if __name__ == "__main__":
                 torch.save(text_encoder.state_dict(),
                            '{0}/text_encoder{1}.pth'.format(model_dir, epoch))
                 print('Save G/Ds models.')
+        df = pd.DataFrame()
+        df['eval_wlosses']=wlosses
+        df['eval_slosses']=slosses
+        df.to_csv('{0}/val_losses.csv'.format(metrics_dir))
     except KeyboardInterrupt:
         print('-' * 89)
         print('Exiting from training early')
