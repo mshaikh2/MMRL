@@ -33,7 +33,8 @@ dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
 sys.path.append(dir_path)
 
 
-UPDATE_INTERVAL = 2
+UPDATE_INTERVAL = 200
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a DAMSM network')
     parser.add_argument('--cfg', dest='cfg_file',
@@ -146,7 +147,7 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
                                    ixtoword, attn_maps, att_sze)
             if img_set is not None:
                 im = Image.fromarray(img_set)
-                fullpath = '%s/attention_maps%d.png' % (image_dir, step)
+                fullpath = '{0}/attention_maps_e{1}_s{2}.png' % (image_dir,epoch, step)
                 im.save(fullpath)
     return count
 
@@ -178,8 +179,8 @@ def evaluate(dataloader, cnn_model, rnn_model, batch_size):
         if step == 50:
             break
 
-    s_cur_loss = s_total_loss[0] / step
-    w_cur_loss = w_total_loss[0] / step
+    s_cur_loss = s_total_loss / step
+    w_cur_loss = w_total_loss / step
 
     return s_cur_loss, w_cur_loss
 
@@ -292,9 +293,10 @@ if __name__ == "__main__":
         for epoch in range(start_epoch, cfg.TRAIN.MAX_EPOCH):
             optimizer = optim.Adam(para, lr=lr, betas=(0.5, 0.999))
             epoch_start_time = time.time()
+            
             count = train(dataloader, image_encoder, text_encoder,
-                          batch_size, labels, optimizer, epoch,
-                          dataset.ixtoword, image_dir)
+                  batch_size, labels, optimizer, epoch,
+                  dataset.ixtoword, image_dir)
             print('-' * 89)
             if len(dataloader_val) > 0:
                 s_loss, w_loss = evaluate(dataloader_val, image_encoder,
@@ -309,9 +311,9 @@ if __name__ == "__main__":
             if (epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0 or
                 epoch == cfg.TRAIN.MAX_EPOCH):
                 torch.save(image_encoder.state_dict(),
-                           '%s/image_encoder%d.pth' % (model_dir, epoch))
+                           '{0}/image_encoder{1}.pth'.format(model_dir, epoch))
                 torch.save(text_encoder.state_dict(),
-                           '%s/text_encoder%d.pth' % (model_dir, epoch))
+                           '{0}/text_encoder{1}.pth'.format(model_dir, epoch))
                 print('Save G/Ds models.')
     except KeyboardInterrupt:
         print('-' * 89)

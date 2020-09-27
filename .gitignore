@@ -1,2 +1,4 @@
 data/*
 notebooks/__pycache__
+notebooks/miscc/__pycache_
+output/*
