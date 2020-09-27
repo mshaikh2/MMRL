@@ -1,1 +1,1 @@
-# MMRL
+# Multimodal Representation Learning (MMRL)
