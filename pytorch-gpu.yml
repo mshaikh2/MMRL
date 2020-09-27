@@ -151,5 +151,4 @@ dependencies:
     - termcolor==1.1.0
     - torchsummary==1.5.1
     - wrapt==1.11.2
-prefix: /home/mshaikh2/anaconda3/envs/pytorch-gpu
 
