@@ -1,4 +1,5 @@
+notebooks/miscc/__pycache__
 data/*
 notebooks/__pycache__
-notebooks/miscc/__pycache_
 output/*
+notebooks/.ipynb_checkpoints
