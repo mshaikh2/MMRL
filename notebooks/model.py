@@ -70,6 +70,135 @@ class ResBlock(nn.Module):
         out += residual
         return out
 
+    
+################ Transformer: Text Encoder ############
+class SelfAttention(nn.Module):
+    def __init__(self, k, heads=8):
+        super().__init__()
+        self.k, self.heads = k, heads
+        # These compute the queries, keys and values for all 
+        # heads (as a single concatenated vector)
+        self.tokeys    = nn.Linear(k, k * heads, bias=False)
+        self.toqueries = nn.Linear(k, k * heads, bias=False)
+        self.tovalues  = nn.Linear(k, k * heads, bias=False)
+
+        # This unifies the outputs of the different heads into 
+        # a single k-vector
+        self.unifyheads = nn.Linear(heads * k, k)
+    def forward(self, x):
+        b, t, k = x.size()
+        h = self.heads
+
+        queries = self.toqueries(x).view(b, t, h, k)
+        keys    = self.tokeys(x)   .view(b, t, h, k)
+        values  = self.tovalues(x) .view(b, t, h, k)
+        
+        keys = keys.transpose(1, 2).contiguous().view(b * h, t, k)
+        queries = queries.transpose(1, 2).contiguous().view(b * h, t, k)
+        values = values.transpose(1, 2).contiguous().view(b * h, t, k)
+        
+        queries = queries / (k ** (1/4))
+        keys    = keys / (k ** (1/4))
+
+        # - get dot product of queries and keys, and scale
+        dot = torch.bmm(queries, keys.transpose(1, 2))
+        # - dot has size (b*h, t, t) containing raw weights
+
+        dot = F.softmax(dot, dim=2) 
+        # - dot now contains row-wise normalized weights
+        
+        # apply the self attention to the values
+        out = torch.bmm(dot, values).view(b, h, t, k)
+        
+        out = out.transpose(1, 2).contiguous().view(b, t, h * k)
+        return self.unifyheads(out)
+
+class TransformerBlock(nn.Module):
+
+    def __init__(self, emb, heads, mask, seq_length, ff_hidden_mult=4, dropout=0.0, wide=True):
+        super().__init__()
+
+        self.attention = SelfAttention(k=emb, heads=heads)
+        
+        self.mask = mask
+
+        self.norm1 = nn.LayerNorm(emb)
+        self.norm2 = nn.LayerNorm(emb)
+
+        self.ff = nn.Sequential(
+            nn.Linear(emb, ff_hidden_mult * emb),
+            nn.ReLU(),
+            nn.Linear(ff_hidden_mult * emb, emb)
+        )
+
+        self.do = nn.Dropout(dropout)
+
+    def forward(self, x):
+
+        attended = self.attention(x)
+
+        x = self.norm1(attended + x)
+
+        x = self.do(x)
+
+        fedforward = self.ff(x)
+
+        x = self.norm2(fedforward + x)
+
+        x = self.do(x)
+
+        return x
+class TEXT_TRANSFORMER_ENCODER(nn.Module):
+    def __init__(self, emb, heads, depth, seq_length, num_tokens, dropout=0.0, wide=False):
+        super().__init__()
+
+        self.num_tokens = num_tokens
+
+        self.token_embedding = nn.Embedding(embedding_dim=emb, num_embeddings=num_tokens)
+        self.pos_embedding = nn.Embedding(embedding_dim=emb, num_embeddings=seq_length)
+
+        tblocks = []
+        for i in range(depth):
+            tblocks.append(
+                TransformerBlock(emb=emb
+                                 , heads=heads
+                                 , seq_length=seq_length
+                                 , mask=False
+                                 , dropout=dropout
+                                 , wide=wide))
+
+        self.tblocks = nn.Sequential(*tblocks)
+
+        self.do = nn.Dropout(dropout)
+
+        
+    def forward(self, x):
+        """
+        :param x: A batch by sequence length integer tensor of token indices.
+        :return: predicted log-probability vectors for each token based on the preceding tokens.
+        """
+        tokens = self.token_embedding(x)
+        
+        
+        b, t, e = tokens.size()
+#         print('b:{0}, t:{1}, e:{2}'.format(b, t, e))
+        positions = torch.arange(t,device='cuda')
+        
+        positions = self.pos_embedding(positions)[None, :, :].expand(b, t, e)
+        
+#         print('positions:',positions.size())
+        x = tokens + positions
+        x = self.do(x)
+
+#         print('x:',x.size())
+        words_emb = self.tblocks(x)
+        sent_emb = words_emb.mean(dim=1) # pool over the time dimension
+        words_emb = torch.transpose(words_emb,1,2)
+        
+#         print('words_emb:',words_emb.shape,'sent_emb:',sent_emb.shape)
+
+        return words_emb,sent_emb
+
 
 # ############## Text2Image Encoder-Decoder #######
 class RNN_ENCODER(nn.Module):

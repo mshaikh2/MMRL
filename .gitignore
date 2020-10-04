@@ -3,3 +3,4 @@ data/*
 notebooks/__pycache__
 output/*
 notebooks/.ipynb_checkpoints
+tensorboard/*

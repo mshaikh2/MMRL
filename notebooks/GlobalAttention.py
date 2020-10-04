@@ -45,6 +45,7 @@ def func_attention(query, context, gamma1):
     # Get attention
     # (batch x sourceL x ndf)(batch x ndf x queryL)
     # -->batch x sourceL x queryL
+#     print('contextT:',contextT.size(), 'query:', query.size())
     attn = torch.bmm(contextT, query) # Eq. (7) in AttnGAN paper
     # --> batch*sourceL x queryL
     attn = attn.view(batch_size*sourceL, queryL)
