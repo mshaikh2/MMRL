@@ -166,7 +166,7 @@ def train(dataloader, cnn_model, trx_model, batch_size,
 
 def evaluate(dataloader, cnn_model, trx_model, batch_size):
     cnn_model.eval()
-    rnn_model.eval()
+    trx_model.eval()
     s_total_loss = 0
     w_total_loss = 0
     for step, data in enumerate(dataloader, 0):
