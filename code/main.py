@@ -5,6 +5,10 @@ from datasets import TextDataset
 from trainer import condGANTrainer as trainer
 
 import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1,2"
+
+
+# import os
 import sys
 import time
 import random
@@ -13,7 +17,7 @@ import datetime
 import dateutil.tz
 import argparse
 import numpy as np
-
+import pandas as pd
 import torch
 import torchvision.transforms as transforms
 
@@ -132,6 +136,15 @@ if __name__ == "__main__":
         dataset, batch_size=cfg.TRAIN.BATCH_SIZE,
         drop_last=True, shuffle=bshuffle, num_workers=int(cfg.WORKERS))
 
+    
+#     dataset_val = TextDataset(cfg.DATA_DIR, 'test',
+#                               base_size=cfg.TREE.BASE_SIZE,
+#                               transform=image_transform)
+# #     val_batch_size = 14
+#     dataloader_val = torch.utils.data.DataLoader(
+#         dataset_val, batch_size=cfg.TRAIN.BATCH_SIZE, drop_last=True,
+#         shuffle=True, num_workers=int(cfg.WORKERS))
+    
     # Define models and go to train/evaluate
     algo = trainer(output_dir, dataloader, dataset.n_words, dataset.ixtoword)
 
@@ -141,7 +154,21 @@ if __name__ == "__main__":
     else:
         '''generate images from pre-extracted embeddings'''
         if cfg.B_VALIDATION:
-            algo.sampling(split_dir)  # generate images for the whole valid dataset
+            df = pd.read_csv('../IMG_TEXT_TXFMR_COCO_IS_Results.csv')
+            dont_run_epochs = df['epoch'].values
+#             dont_run_epochs
+            paths = []
+            counter = 0
+            num_models = len(os.listdir('../output/coco_glu-gan2_2020_10_13_23_16_32/Model'))
+            for gPath in sorted(os.listdir('../output/coco_glu-gan2_2020_10_13_23_16_32/Model'),reverse=True):
+                if 'netG' in gPath and '.pth' in gPath:
+                    e = int(gPath.split('_')[-1].replace('/','').split('.')[0])
+                    print('---- model counter --- {}/{}'.format(counter,num_models))
+                    if e not in dont_run_epochs:
+                        full_netGpath = os.path.join('../output/coco_glu-gan2_2020_10_13_23_16_32/Model',gPath)
+#                         print(full_netGpath)
+                        algo.sampling(split_dir,full_netGpath)  # generate images for the whole valid dataset
+                    counter+=1
         else:
             gen_example(dataset.wordtoix, algo)  # generate images for customized captions
     end_t = time.time()

@@ -9,18 +9,19 @@ WORKERS: 4
 TREE:
     BRANCH_NUM: 3
 
+# B_VALIDATION: True
 
 TRAIN:
     FLAG: True
-    NET_G: ''  # '../models/coco_AttnGAN2.pth'
+    NET_G: '../output/coco_glu-gan2_2020_10_13_23_16_32/Model/netG_epoch_120.pth'
     B_NET_D: True
     BATCH_SIZE: 14  # 32
-    MAX_EPOCH: 120
-    SNAPSHOT_INTERVAL: 5
+    MAX_EPOCH: 130
+    SNAPSHOT_INTERVAL: 2
     DISCRIMINATOR_LR: 0.0002
     GENERATOR_LR: 0.0002
     #
-    NET_E: '../DAMSMencoders/coco/text_encoder100.pth'
+    NET_E: '../DAMSMencoders/coco/text_encoder240.pth'
     SMOOTH:
         GAMMA1: 4.0  # 1,2,5 good 4 best  10&100bad
         GAMMA2: 5.0
@@ -37,4 +38,4 @@ GAN:
 TEXT:
     EMBEDDING_DIM: 256
     CAPTIONS_PER_IMAGE: 5
-    WORDS_NUM: 12
+    WORDS_NUM: 15

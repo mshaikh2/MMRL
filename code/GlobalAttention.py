@@ -45,10 +45,11 @@ def func_attention(query, context, gamma1):
     # Get attention
     # (batch x sourceL x ndf)(batch x ndf x queryL)
     # -->batch x sourceL x queryL
+#     print('contextT:',contextT.size(), 'query:', query.size())
     attn = torch.bmm(contextT, query) # Eq. (7) in AttnGAN paper
     # --> batch*sourceL x queryL
     attn = attn.view(batch_size*sourceL, queryL)
-    attn = nn.Softmax()(attn)  # Eq. (8)
+    attn = nn.Softmax(-1)(attn)  # Eq. (8)
 
     # --> batch x sourceL x queryL
     attn = attn.view(batch_size, sourceL, queryL)
@@ -57,7 +58,7 @@ def func_attention(query, context, gamma1):
     attn = attn.view(batch_size*queryL, sourceL)
     #  Eq. (9)
     attn = attn * gamma1
-    attn = nn.Softmax()(attn)
+    attn = nn.Softmax(-1)(attn)
     attn = attn.view(batch_size, queryL, sourceL)
     # --> batch x sourceL x queryL
     attnT = torch.transpose(attn, 1, 2).contiguous()
@@ -73,7 +74,7 @@ class GlobalAttentionGeneral(nn.Module):
     def __init__(self, idf, cdf):
         super(GlobalAttentionGeneral, self).__init__()
         self.conv_context = conv1x1(cdf, idf)
-        self.sm = nn.Softmax()
+        self.sm = nn.Softmax(-1)
         self.mask = None
 
     def applyMask(self, mask):

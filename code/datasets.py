@@ -58,33 +58,37 @@ def prepare_data(data):
 
 def get_imgs(img_path, imsize, bbox=None,
              transform=None, normalize=None):
-    img = Image.open(img_path).convert('RGB')
-    width, height = img.size
-    if bbox is not None:
-        r = int(np.maximum(bbox[2], bbox[3]) * 0.75)
-        center_x = int((2 * bbox[0] + bbox[2]) / 2)
-        center_y = int((2 * bbox[1] + bbox[3]) / 2)
-        y1 = np.maximum(0, center_y - r)
-        y2 = np.minimum(height, center_y + r)
-        x1 = np.maximum(0, center_x - r)
-        x2 = np.minimum(width, center_x + r)
-        img = img.crop([x1, y1, x2, y2])
+    try:
+        img = Image.open(img_path).convert('RGB')
+        width, height = img.size
+        if bbox is not None:
+            r = int(np.maximum(bbox[2], bbox[3]) * 0.75)
+            center_x = int((2 * bbox[0] + bbox[2]) / 2)
+            center_y = int((2 * bbox[1] + bbox[3]) / 2)
+            y1 = np.maximum(0, center_y - r)
+            y2 = np.minimum(height, center_y + r)
+            x1 = np.maximum(0, center_x - r)
+            x2 = np.minimum(width, center_x + r)
+            img = img.crop([x1, y1, x2, y2])
 
-    if transform is not None:
-        img = transform(img)
+        if transform is not None:
+            img = transform(img)
 
-    ret = []
-    if cfg.GAN.B_DCGAN:
-        ret = [normalize(img)]
-    else:
-        for i in range(cfg.TREE.BRANCH_NUM):
-            # print(imsize[i])
-            if i < (cfg.TREE.BRANCH_NUM - 1):
-                re_img = transforms.Scale(imsize[i])(img)
-            else:
-                re_img = img
-            ret.append(normalize(re_img))
-
+        ret = []
+        if cfg.GAN.B_DCGAN:
+            ret = [normalize(img)]
+        else:
+            for i in range(cfg.TREE.BRANCH_NUM):
+                # print(imsize[i])
+                if i < (cfg.TREE.BRANCH_NUM - 1):
+                    re_img = transforms.Scale(imsize[i])(img)
+                else:
+                    re_img = img
+                ret.append(normalize(re_img))
+    except Exception as ex:
+        print('cannot open image:',img_path)
+        print('----------------------------')
+        print(ex)
     return ret
 
 
@@ -114,8 +118,7 @@ class TextDataset(data.Dataset):
 
         self.filenames, self.captions, self.ixtoword, \
             self.wordtoix, self.n_words = self.load_text_data(data_dir, split)
-
-        
+        print(split_dir)
         self.class_id = self.load_class_id(split_dir, len(self.filenames))
         self.number_example = len(self.filenames)
 
@@ -134,7 +137,7 @@ class TextDataset(data.Dataset):
         #
         filename_bbox = {img_file[:-4]: [] for img_file in filenames}
         numImgs = len(filenames)
-        for i in xrange(0, numImgs):
+        for i in range(0, numImgs):
             # bbox = [x-left, y-top, width, height]
             bbox = df_bounding_boxes.iloc[i][1:].tolist()
 
@@ -148,7 +151,7 @@ class TextDataset(data.Dataset):
         for i in range(len(filenames)):
             cap_path = '%s/text/%s.txt' % (data_dir, filenames[i])
             with open(cap_path, "r") as f:
-                captions = f.read().decode('utf8').split('\n')
+                captions = f.read().split('\n')
                 cnt = 0
                 for cap in captions:
                     if len(cap) == 0:
@@ -251,8 +254,9 @@ class TextDataset(data.Dataset):
 
     def load_class_id(self, data_dir, total_num):
         if os.path.isfile(data_dir + '/class_info.pickle'):
+            print(data_dir + '/class_info.pickle')
             with open(data_dir + '/class_info.pickle', 'rb') as f:
-                class_id = pickle.load(f)
+                class_id = pickle.load(f, encoding='iso-8859-1')
         else:
             class_id = np.arange(total_num)
         return class_id
@@ -261,7 +265,7 @@ class TextDataset(data.Dataset):
         filepath = '%s/%s/filenames.pickle' % (data_dir, split)
         if os.path.isfile(filepath):
             with open(filepath, 'rb') as f:
-                filenames = pickle.load(f)
+                filenames = pickle.load(f, encoding='iso-8859-1')
             print('Load filenames from: %s (%d)' % (filepath, len(filenames)))
         else:
             filenames = []

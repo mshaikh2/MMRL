@@ -8,15 +8,17 @@ from miscc.config import cfg, cfg_from_file
 from datasets import TextDataset
 from datasets import prepare_data
 
-from model import TEXT_TRANSFORMER_ENCODER, CNN_ENCODER
+from model import TEXT_TRANSFORMER_ENCODERv2, CNN_ENCODER
 
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 import sys
 import time
 import random
 import pprint
 import datetime
 import dateutil.tz
+    
 import argparse
 import numpy as np
 from PIL import Image
@@ -27,14 +29,14 @@ import torch.optim as optim
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
-
+import PositionalEmbedding as PE
 from torch.utils.tensorboard import SummaryWriter
 
 dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
 sys.path.append(dir_path)
 
 
-UPDATE_INTERVAL = 500
+UPDATE_INTERVAL = 900
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a DAMSM network')
@@ -63,7 +65,7 @@ def train(dataloader, cnn_model, trx_model, batch_size,
     count = (epoch + 1) * len(dataloader)
     start_time = time.time()
     for step, data in enumerate(dataloader, 0):
-        print('step:{:6d}'.format(step), end='\r')
+        print('step:{:6d}|{:3d}'.format(step,len(dataloader)), end='\r')
         trx_model.zero_grad()
         cnn_model.zero_grad()
 
@@ -125,7 +127,7 @@ def train(dataloader, cnn_model, trx_model, batch_size,
                                       cfg.TRAIN.RNN_GRAD_CLIP)
         optimizer.step()
 
-        if step % UPDATE_INTERVAL == 0:
+        if (step % UPDATE_INTERVAL == 0 or step == (len(dataloader)-1)) and step > 0:
             count = epoch * len(dataloader) + step
 
 #             print(count)
@@ -202,9 +204,9 @@ def evaluate(dataloader, cnn_model, trx_model, batch_size):
 def build_models():
     # build model ############################################################
     #     text_encoder = RNN_ENCODER(dataset.n_words, nhidden=cfg.TEXT.EMBEDDING_DIM)
-    text_encoder = TEXT_TRANSFORMER_ENCODER(emb=cfg.TEXT.EMBEDDING_DIM
+    text_encoder = TEXT_TRANSFORMER_ENCODERv2(emb=cfg.TEXT.EMBEDDING_DIM
                                             ,heads=8
-                                            ,depth=4
+                                            ,depth=1
                                             ,seq_length=cfg.TEXT.WORDS_NUM
                                             ,num_tokens=dataset.n_words)
     image_encoder = CNN_ENCODER(cfg.TEXT.EMBEDDING_DIM)
@@ -213,12 +215,28 @@ def build_models():
     if cfg.TRAIN.NET_E != '':
         print('Loading... ', cfg.TRAIN.NET_E)
         state_dict = torch.load(cfg.TRAIN.NET_E)
-        text_encoder.load_state_dict(state_dict)
+        
+        
+        new_state_dict = {}
+        for k,v in state_dict.items():
+            new_state_dict[k.replace('module.','')]=v
+        new_state_dict
+        text_encoder.load_state_dict(new_state_dict)
+        
+        
+#         text_encoder.load_state_dict(state_dict)
         print('Load ', cfg.TRAIN.NET_E)
         #
         name = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
         state_dict = torch.load(name)
-        image_encoder.load_state_dict(state_dict)
+        
+        new_state_dict = {}
+        for k,v in state_dict.items():
+            new_state_dict[k.replace('module.','')]=v
+        new_state_dict
+        
+        
+        image_encoder.load_state_dict(new_state_dict)
         print('Load ', name)
 
         istart = cfg.TRAIN.NET_E.rfind('_') + 8
@@ -267,7 +285,10 @@ if __name__ == "__main__":
     ##########################################################################
     now = datetime.datetime.now(dateutil.tz.tzlocal())
     timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
-    output_dir = '../output/TRX_{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
+    
+    isTrainable = 'T'
+    layers = 1
+    output_dir = '../output/{0}_L{1}_TRX_{2}_{3}_{4}'.format(isTrainable,layers,cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
 
     model_dir = os.path.join(output_dir, 'Model')
     image_dir = os.path.join(output_dir, 'Image')
@@ -276,10 +297,10 @@ if __name__ == "__main__":
     mkdir_p(image_dir)
     mkdir_p(metrics_dir)
 
-    torch.cuda.set_device(cfg.GPU_ID)
+#     torch.cuda.set_device(cfg.GPU_ID)
     cudnn.benchmark = True
 
-    tb_dir = '../tensorboard/TRX_{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
+    tb_dir = '../tensorboard/{0}_L{1}_TRX_{2}_{3}_{4}'.format(isTrainable,layers,cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
     mkdir_p(tb_dir)
     tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
 
@@ -310,10 +331,43 @@ if __name__ == "__main__":
 
     # Train ##############################################################
     text_encoder, image_encoder, labels, start_epoch = build_models()
-    para = list(text_encoder.parameters())
-    for v in image_encoder.parameters():
+    
+    
+    # Initialize the embeddings with pretrained BERT embeddings ##########
+    df = pd.read_pickle('../data/coco/bert_word_embedding.pickle')
+    embedding_matrix = df.values
+#     embedding_matrix.shape
+    embedding_matrix_ = torch.FloatTensor(embedding_matrix)
+    embedding_matrix_ = embedding_matrix_.cuda()
+#     embedding_matrix_
+    pos_encoding = PE.positional_encoding(cfg.TEXT.WORDS_NUM, dimensions=cfg.TEXT.EMBEDDING_DIM)
+    pos_encoding = np.squeeze(pos_encoding,axis=0)
+    pos_encoding_ = torch.FloatTensor(pos_encoding)
+    pos_encoding_ = pos_encoding_.cuda()
+#     pos_encoding_
+    text_encoder.init_embeddings(word_embedding=embedding_matrix_
+                                 ,positional_embedding=pos_encoding_
+                                 ,IsTrainable=True)
+    
+    print('pretrained BERT embeddings loaded..')
+    print('sinusoidal position embeddings loaded..')
+    # ------------------------------------------------------------- #######
+    
+    print('\n\n CNN Encoder parameters that do not require grad are:')
+    para = []
+    for k,v in image_encoder.named_parameters():
         if v.requires_grad:
             para.append(v)
+        else:
+            print(k)
+    print('\n\n Text Encoder parameters that do not require grad are:')
+    for k,v in text_encoder.named_parameters():
+        if v.requires_grad:
+            para.append(v)
+        else:
+            print(k)
+#     text_encoder = torch.nn.DataParallel(text_encoder, device_ids=[0,1])
+#     image_encoder = torch.nn.DataParallel(image_encoder, device_ids=[0,1])
     # optimizer = optim.Adam(para, lr=cfg.TRAIN.ENCODER_LR, betas=(0.5, 0.999))
     # At any point you can hit Ctrl + C to break out of training early.
     try:
@@ -347,10 +401,7 @@ if __name__ == "__main__":
                 torch.save(text_encoder.state_dict(),
                            '{0}/text_encoder{1}.pth'.format(model_dir, epoch))
                 print('Save G/Ds models.')
-        df = pd.DataFrame()
-        df['eval_wlosses']=wlosses
-        df['eval_slosses']=slosses
-        df.to_csv('{0}/val_losses.csv'.format(metrics_dir))
+        
     except KeyboardInterrupt:
         print('-' * 89)
         print('Exiting from training early')

@@ -8,9 +8,10 @@ from miscc.config import cfg, cfg_from_file
 from datasets import TextDataset
 from datasets import prepare_data
 
-from model import RNN_ENCODER, CNN_ENCODER
+from model import TEXT_TRANSFORMER_ENCODERv2, CNN_ENCODER
 
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 import sys
 import time
 import random
@@ -27,13 +28,14 @@ import torch.optim as optim
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
-
+import PositionalEmbedding as PE
+from torch.utils.tensorboard import SummaryWriter
 
 dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
 sys.path.append(dir_path)
 
 
-UPDATE_INTERVAL = 100
+UPDATE_INTERVAL = 900
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a DAMSM network')
@@ -48,11 +50,13 @@ def parse_args():
 
 
 
-def train(dataloader, cnn_model, rnn_model, batch_size,
+
+
+def train(dataloader, cnn_model, trx_model, batch_size,
           labels, optimizer, epoch, ixtoword, image_dir):
     
     cnn_model.train()
-    rnn_model.train()
+    trx_model.train()
     s_total_loss0 = 0
     s_total_loss1 = 0
     w_total_loss0 = 0
@@ -60,8 +64,8 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
     count = (epoch + 1) * len(dataloader)
     start_time = time.time()
     for step, data in enumerate(dataloader, 0):
-        # print('step', step)
-        rnn_model.zero_grad()
+        print('step:{:6d}|{:3d}'.format(step,len(dataloader)), end='\r')
+        trx_model.zero_grad()
         cnn_model.zero_grad()
 
         imgs, captions, cap_lens, \
@@ -74,13 +78,19 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
 #         print(words_features.shape,sent_code.shape)
         nef, att_sze = words_features.size(1), words_features.size(2)
         # words_features = words_features.view(batch_size, nef, -1)
-#         print(nef,att_sze)
+#         print('nef:{0},att_sze:{1}'.format(nef,att_sze))
 
-        hidden = rnn_model.init_hidden(batch_size)
+#         hidden = trx_model.init_hidden(batch_size)
         # words_emb: batch_size x nef x seq_len
         # sent_emb: batch_size x nef
-        words_emb, sent_emb = rnn_model(captions, cap_lens, hidden)
-#         print('here')
+#         print('captions:',captions, captions.size())
+        
+        # words_emb: batch_size x nef x seq_len
+        # sent_emb: batch_size x nef
+#         words_emb, sent_emb = trx_model(captions, cap_lens, hidden)
+        
+        words_emb, sent_emb = trx_model(captions)
+#         print('words_emb:',words_emb.size(),', sent_emb:', sent_emb.size())
         w_loss0, w_loss1, attn_maps = words_loss(words_features, words_emb, labels,
                                                  cap_lens, class_ids, batch_size)
         
@@ -112,11 +122,11 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
         #
         # `clip_grad_norm` helps prevent
         # the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm_(rnn_model.parameters(),
+        torch.nn.utils.clip_grad_norm_(trx_model.parameters(),
                                       cfg.TRAIN.RNN_GRAD_CLIP)
         optimizer.step()
 
-        if step % UPDATE_INTERVAL == 0:
+        if (step % UPDATE_INTERVAL == 0 or step == (len(dataloader)-1)) and step > 0:
             count = epoch * len(dataloader) + step
 
 #             print(count)
@@ -134,6 +144,10 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
                           elapsed * 1000. / UPDATE_INTERVAL,
                           s_cur_loss0, s_cur_loss1,
                           w_cur_loss0, w_cur_loss1))
+            tbw.add_scalar('train_w_loss0', float(w_cur_loss0.item()), epoch)
+            tbw.add_scalar('train_s_loss0', float(s_cur_loss0.item()), epoch)
+            tbw.add_scalar('train_w_loss1', float(w_cur_loss1.item()), epoch)
+            tbw.add_scalar('train_s_loss1', float(s_cur_loss1.item()), epoch)
             s_total_loss0 = 0
             s_total_loss1 = 0
             w_total_loss0 = 0
@@ -151,9 +165,9 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
     return count
 
 
-def evaluate(dataloader, cnn_model, rnn_model, batch_size):
+def evaluate(dataloader, cnn_model, trx_model, batch_size):
     cnn_model.eval()
-    rnn_model.eval()
+    trx_model.eval()
     s_total_loss = 0
     w_total_loss = 0
     for step, data in enumerate(dataloader, 0):
@@ -164,9 +178,11 @@ def evaluate(dataloader, cnn_model, rnn_model, batch_size):
         # nef = words_features.size(1)
         # words_features = words_features.view(batch_size, nef, -1)
 
-        hidden = rnn_model.init_hidden(batch_size)
-        words_emb, sent_emb = rnn_model(captions, cap_lens, hidden)
+#         hidden = rnn_model.init_hidden(batch_size)
+#         words_emb, sent_emb = rnn_model(captions, cap_lens, hidden)
 
+        words_emb, sent_emb = trx_model(captions)
+    
         w_loss0, w_loss1, attn = words_loss(words_features, words_emb, labels,
                                             cap_lens, class_ids, batch_size)
         w_total_loss += (w_loss0 + w_loss1).data
@@ -186,19 +202,40 @@ def evaluate(dataloader, cnn_model, rnn_model, batch_size):
 
 def build_models():
     # build model ############################################################
-    text_encoder = RNN_ENCODER(dataset.n_words, nhidden=cfg.TEXT.EMBEDDING_DIM)
+    #     text_encoder = RNN_ENCODER(dataset.n_words, nhidden=cfg.TEXT.EMBEDDING_DIM)
+    text_encoder = TEXT_TRANSFORMER_ENCODERv2(emb=cfg.TEXT.EMBEDDING_DIM
+                                            ,heads=8
+                                            ,depth=3
+                                            ,seq_length=cfg.TEXT.WORDS_NUM
+                                            ,num_tokens=dataset.n_words)
     image_encoder = CNN_ENCODER(cfg.TEXT.EMBEDDING_DIM)
     labels = Variable(torch.LongTensor(range(batch_size)))
     start_epoch = 0
     if cfg.TRAIN.NET_E != '':
         print('Loading... ', cfg.TRAIN.NET_E)
         state_dict = torch.load(cfg.TRAIN.NET_E)
-        text_encoder.load_state_dict(state_dict)
+        
+        
+        new_state_dict = {}
+        for k,v in state_dict.items():
+            new_state_dict[k.replace('module.','')]=v
+        new_state_dict
+        text_encoder.load_state_dict(new_state_dict)
+        
+        
+#         text_encoder.load_state_dict(state_dict)
         print('Load ', cfg.TRAIN.NET_E)
         #
         name = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
         state_dict = torch.load(name)
-        image_encoder.load_state_dict(state_dict)
+        
+        new_state_dict = {}
+        for k,v in state_dict.items():
+            new_state_dict[k.replace('module.','')]=v
+        new_state_dict
+        
+        
+        image_encoder.load_state_dict(new_state_dict)
         print('Load ', name)
 
         istart = cfg.TRAIN.NET_E.rfind('_') + 8
@@ -247,7 +284,9 @@ if __name__ == "__main__":
     ##########################################################################
     now = datetime.datetime.now(dateutil.tz.tzlocal())
     timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
-    output_dir = '../output/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
+    
+    isTrainable = 'F'
+    output_dir = '../output/{0}_TRX_{1}_{2}_{3}'.format(isTrainable,cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
 
     model_dir = os.path.join(output_dir, 'Model')
     image_dir = os.path.join(output_dir, 'Image')
@@ -256,8 +295,12 @@ if __name__ == "__main__":
     mkdir_p(image_dir)
     mkdir_p(metrics_dir)
 
-    torch.cuda.set_device(cfg.GPU_ID)
+#     torch.cuda.set_device(cfg.GPU_ID)
     cudnn.benchmark = True
+
+    tb_dir = '../tensorboard/{0}_TRX_{1}_{2}_{3}'.format(isTrainable,cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
+    mkdir_p(tb_dir)
+    tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
 
     # Get data loader ##################################################
     imsize = cfg.TREE.BASE_SIZE * (2 ** (cfg.TREE.BRANCH_NUM-1))
@@ -286,10 +329,41 @@ if __name__ == "__main__":
 
     # Train ##############################################################
     text_encoder, image_encoder, labels, start_epoch = build_models()
-    para = list(text_encoder.parameters())
-    for v in image_encoder.parameters():
+    
+    
+    # Initialize the embeddings with pretrained BERT embeddings ##########
+    df = pd.read_pickle('../data/coco/bert_word_embedding.pickle')
+    embedding_matrix = df.values
+#     embedding_matrix.shape
+    embedding_matrix_ = torch.FloatTensor(embedding_matrix)
+    embedding_matrix_ = embedding_matrix_.cuda()
+#     embedding_matrix_
+    pos_encoding = PE.positional_encoding(cfg.TEXT.WORDS_NUM, dimensions=cfg.TEXT.EMBEDDING_DIM)
+    pos_encoding = np.squeeze(pos_encoding,axis=0)
+    pos_encoding_ = torch.FloatTensor(pos_encoding)
+    pos_encoding_ = pos_encoding_.cuda()
+#     pos_encoding_
+    text_encoder.init_embeddings(word_embedding=embedding_matrix_,positional_embedding=pos_encoding_)
+    
+    print('pretrained BERT embeddings loaded..')
+    print('sinusoidal position embeddings loaded..')
+    # ------------------------------------------------------------- #######
+    
+    print('\n\n CNN Encoder parameters that do not require grad are:')
+    para = []
+    for k,v in image_encoder.named_parameters():
         if v.requires_grad:
             para.append(v)
+        else:
+            print(k)
+    print('\n\n Text Encoder parameters that do not require grad are:')
+    for k,v in text_encoder.named_parameters():
+        if v.requires_grad:
+            para.append(v)
+        else:
+            print(k)
+#     text_encoder = torch.nn.DataParallel(text_encoder, device_ids=[0,1])
+#     image_encoder = torch.nn.DataParallel(image_encoder, device_ids=[0,1])
     # optimizer = optim.Adam(para, lr=cfg.TRAIN.ENCODER_LR, betas=(0.5, 0.999))
     # At any point you can hit Ctrl + C to break out of training early.
     try:
@@ -297,7 +371,7 @@ if __name__ == "__main__":
         for epoch in range(start_epoch, cfg.TRAIN.MAX_EPOCH):
             optimizer = optim.Adam(para, lr=lr, betas=(0.5, 0.999))
             epoch_start_time = time.time()
-            
+
             count = train(dataloader, image_encoder, text_encoder,
                   batch_size, labels, optimizer, epoch,
                   dataset.ixtoword, image_dir)
@@ -310,6 +384,8 @@ if __name__ == "__main__":
                 print('| end epoch {:3d} | valid loss '
                       '{:5.2f} {:5.2f} | lr {:.5f}|'
                       .format(epoch, s_loss, w_loss, lr))
+                tbw.add_scalar('val_w_loss', float(w_loss.item()), epoch)
+                tbw.add_scalar('val_s_loss', float(s_loss.item()), epoch)
             print('-' * 89)
             if lr > cfg.TRAIN.ENCODER_LR/10.:
                 lr *= 0.98
@@ -328,3 +404,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print('-' * 89)
         print('Exiting from training early')
+

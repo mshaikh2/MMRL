@@ -1,6 +1,13 @@
 from __future__ import print_function
 from six.moves import range
+import os
+import time
+import numpy as np
+import sys
+import warnings
 
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,21 +15,21 @@ from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 
 from PIL import Image
-
+import datetime
+import dateutil.tz
 from miscc.config import cfg
 from miscc.utils import mkdir_p
 from miscc.utils import build_super_images, build_super_images2
 from miscc.utils import weights_init, load_params, copy_G_params
 from model import G_DCGAN, G_NET
 from datasets import prepare_data
-from model import RNN_ENCODER, CNN_ENCODER
-
+from model import TEXT_TRANSFORMER_ENCODERv2, CNN_ENCODER
+# from InceptionScore import calculate_inception_score
 from miscc.losses import words_loss
 from miscc.losses import discriminator_loss, generator_loss, KL_loss
-import os
-import time
-import numpy as np
-import sys
+
+
+from torch.utils.tensorboard import SummaryWriter
 
 # ################# Text to image task############################ #
 class condGANTrainer(object):
@@ -43,6 +50,7 @@ class condGANTrainer(object):
         self.n_words = n_words
         self.ixtoword = ixtoword
         self.data_loader = data_loader
+#         self.dataloader_val = dataloader_val
         self.num_batches = len(self.data_loader)
 
     def build_models(self):
@@ -61,10 +69,15 @@ class condGANTrainer(object):
         print('Load image encoder from:', img_encoder_path)
         image_encoder.eval()
 
-        text_encoder = \
-            RNN_ENCODER(self.n_words, nhidden=cfg.TEXT.EMBEDDING_DIM)
-        state_dict = \
-            torch.load(cfg.TRAIN.NET_E,
+        text_encoder = TEXT_TRANSFORMER_ENCODERv2(emb=cfg.TEXT.EMBEDDING_DIM
+                                            ,heads=8
+                                            ,depth=1
+                                            ,seq_length=cfg.TEXT.WORDS_NUM
+                                            ,num_tokens=self.n_words)
+#         state_dict = torch.load(cfg.TRAIN.NET_E)
+#         text_encoder.load_state_dict(state_dict)
+#         print('Load ', cfg.TRAIN.NET_E)
+        state_dict = torch.load(cfg.TRAIN.NET_E,
                        map_location=lambda storage, loc: storage)
         text_encoder.load_state_dict(state_dict)
         for p in text_encoder.parameters():
@@ -174,6 +187,51 @@ class condGANTrainer(object):
             for p in models_list[i].parameters():
                 p.requires_grad = brequires
 
+                
+    def evaluate(self, dataloader, netG, trx_model):
+        netG.eval()
+        trx_model.eval()
+        IS_mean = []
+        IS_std = []
+        for step, data in enumerate(dataloader, 0):
+#             torch.cuda.empty_cache()
+#             torch.cuda.reset_max_memory_cached()
+            print('val step:{:6d}|{:3d}'.format(step,len(dataloader)))
+            real_imgs, captions, cap_lens, \
+                    class_ids, keys = prepare_data(data)
+            nz = cfg.GAN.Z_DIM
+            batch_size = real_imgs[-1].size()[0]
+            print('val batch_size:{0}'.format(batch_size))
+            noise = Variable(torch.FloatTensor(batch_size, nz))
+           
+            fixed_noise = Variable(torch.FloatTensor(batch_size, nz).normal_(0, 1))
+            if cfg.CUDA:
+                noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
+            print('vars initialized...')
+            words_emb, sent_emb = trx_model(captions)
+            words_embs, sent_emb = words_emb.detach(), sent_emb.detach()
+            mask = (captions == 0)
+            num_words = words_embs.size(2)
+            if mask.size(1) > num_words:
+                mask = mask[:, :num_words]
+            
+            noise.data.normal_(0, 1)
+            print('eval initialized...')
+            fake_imgs, _, mu, logvar = netG(noise, sent_emb, words_embs, mask)
+            _, mu, logvar = _[-1].detach().cpu(), mu[-1].detach().cpu(), logvar[-1].detach().cpu()
+            f_img = np.asarray(fake_imgs[-1].permute((0,2,3,1)).detach().cpu())
+            print('eval done.')
+#             print('val f_img.shape:{0}'.format(f_img.shape))
+#             mu,sigma = calculate_inception_score(f_img)
+#             IS_mean.append(mu)
+#             IS_std.append(sigma)
+#             if step == 5:
+#                 break
+
+#         IS_mean_value = np.mean(IS_mean)
+#         IS_std_value = np.mean(IS_std)
+
+        return 0.0,0.0 #IS_mean_value, IS_std_value
     def save_img_results(self, netG, noise, sent_emb, words_embs, mask,
                          image_encoder, captions, cap_lens,
                          gen_iterations, name='current'):
@@ -216,6 +274,14 @@ class condGANTrainer(object):
             im.save(fullpath)
 
     def train(self):
+        now = datetime.datetime.now(dateutil.tz.tzlocal())
+        timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
+
+        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
+        mkdir_p(tb_dir)
+        tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
+
+        
         text_encoder, image_encoder, netG, netsD, start_epoch = self.build_models()
         avg_param_G = copy_G_params(netG)
         optimizerG, optimizersD = self.define_optimizers(netG, netsD)
@@ -236,6 +302,7 @@ class condGANTrainer(object):
             data_iter = iter(self.data_loader)
             step = 0
             while step < self.num_batches:
+                print('step:{:6d}|{:3d}'.format(step,self.num_batches), end='\r')
                 # reset requires_grad to be trainable for all Ds
                 # self.set_requires_grad_value(netsD, True)
 
@@ -245,10 +312,10 @@ class condGANTrainer(object):
                 data = data_iter.next()
                 imgs, captions, cap_lens, class_ids, keys = prepare_data(data)
 
-                hidden = text_encoder.init_hidden(batch_size)
+#                 hidden = text_encoder.init_hidden(batch_size)
                 # words_embs: batch_size x nef x seq_len
                 # sent_emb: batch_size x nef
-                words_embs, sent_emb = text_encoder(captions, cap_lens, hidden)
+                words_embs, sent_emb = text_encoder(captions)#, cap_lens, hidden)
                 words_embs, sent_emb = words_embs.detach(), sent_emb.detach()
                 mask = (captions == 0)
                 num_words = words_embs.size(2)
@@ -260,7 +327,13 @@ class condGANTrainer(object):
                 ######################################################
                 noise.data.normal_(0, 1)
                 fake_imgs, _, mu, logvar = netG(noise, sent_emb, words_embs, mask)
-
+#                 f_img = np.asarray(fake_imgs[-1].permute((0,2,3,1)).detach().cpu())
+#                 print('fake_imgs.size():{0},fake_imgs.min():{1},fake_imgs.max():{2}'.format(fake_imgs[-1].size()
+#                                   ,fake_imgs[-1].min()
+#                                   ,fake_imgs[-1].max()))
+                
+#                 print('f_img.shape:{0}'.format(f_img.shape))
+                
                 #######################################################
                 # (3) Update D network
                 ######################################################
@@ -274,7 +347,7 @@ class condGANTrainer(object):
                     errD.backward()
                     optimizersD[i].step()
                     errD_total += errD
-                    D_logs += 'errD%d: %.2f ' % (i, errD.data[0])
+                    D_logs += 'errD%d: %.2f ' % (i, errD.data)
 
                 #######################################################
                 # (4) Update G network: maximize log(D(G(z)))
@@ -291,7 +364,7 @@ class condGANTrainer(object):
                                    words_embs, sent_emb, match_labels, cap_lens, class_ids)
                 kl_loss = KL_loss(mu, logvar)
                 errG_total += kl_loss
-                G_logs += 'kl_loss: %.2f ' % kl_loss.data[0]
+                G_logs += 'kl_loss: %.2f ' % kl_loss.data
                 # backward and update parameters
                 errG_total.backward()
                 optimizerG.step()
@@ -313,16 +386,28 @@ class condGANTrainer(object):
                     #                       words_embs, mask, image_encoder,
                     #                       captions, cap_lens,
                     #                       epoch, name='current')
+                    
+                #### temporary check ####
+#                 if step == 5:
+#                     break
             end_t = time.time()
 
+            tbw.add_scalar('Loss_D', float(errD_total.item()), epoch)
+            tbw.add_scalar('Loss_G', float(errG_total.item()), epoch)
             print('''[%d/%d][%d]
                   Loss_D: %.2f Loss_G: %.2f Time: %.2fs'''
                   % (epoch, self.max_epoch, self.num_batches,
-                     errD_total.data[0], errG_total.data[0],
+                     errD_total.data, errG_total.data,
                      end_t - start_t))
 
             if epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0:  # and epoch != 0:
+                
                 self.save_model(netG, avg_param_G, netsD, epoch)
+                
+                
+#                 is_mean,is_std = self.evaluate(self.dataloader_val,netG,text_encoder)
+#                 print('is_mean:{:.5f}, is_std:{:.5f}'.format(is_mean,is_std))
+                
 
         self.save_model(netG, avg_param_G, netsD, self.max_epoch)
 
@@ -345,9 +430,9 @@ class condGANTrainer(object):
             im = Image.fromarray(ndarr)
             im.save(fullpath)
 
-    def sampling(self, split_dir):
+    def sampling(self, split_dir,full_netGpath):
         if cfg.TRAIN.NET_G == '':
-            print('Error: the path for morels is not found!')
+            print('Error: the path for generator models is not found!')
         else:
             if split_dir == 'test':
                 split_dir = 'valid'
@@ -360,7 +445,11 @@ class condGANTrainer(object):
             netG.cuda()
             netG.eval()
             #
-            text_encoder = RNN_ENCODER(self.n_words, nhidden=cfg.TEXT.EMBEDDING_DIM)
+            text_encoder = TEXT_TRANSFORMER_ENCODERv2(emb=cfg.TEXT.EMBEDDING_DIM
+                                            ,heads=8
+                                            ,depth=1
+                                            ,seq_length=cfg.TEXT.WORDS_NUM
+                                            ,num_tokens=self.n_words)
             state_dict = \
                 torch.load(cfg.TRAIN.NET_E, map_location=lambda storage, loc: storage)
             text_encoder.load_state_dict(state_dict)
@@ -373,6 +462,8 @@ class condGANTrainer(object):
             noise = Variable(torch.FloatTensor(batch_size, nz), volatile=True)
             noise = noise.cuda()
 
+            cfg.TRAIN.NET_G = full_netGpath
+            
             model_dir = cfg.TRAIN.NET_G
             state_dict = \
                 torch.load(model_dir, map_location=lambda storage, loc: storage)
@@ -397,10 +488,10 @@ class condGANTrainer(object):
 
                     imgs, captions, cap_lens, class_ids, keys = prepare_data(data)
 
-                    hidden = text_encoder.init_hidden(batch_size)
+#                     hidden = text_encoder.init_hidden(batch_size)
                     # words_embs: batch_size x nef x seq_len
                     # sent_emb: batch_size x nef
-                    words_embs, sent_emb = text_encoder(captions, cap_lens, hidden)
+                    words_embs, sent_emb = text_encoder(captions)#, cap_lens, hidden)
                     words_embs, sent_emb = words_embs.detach(), sent_emb.detach()
                     mask = (captions == 0)
                     num_words = words_embs.size(2)
@@ -428,14 +519,18 @@ class condGANTrainer(object):
                         im = Image.fromarray(im)
                         fullpath = '%s_s%d.png' % (s_tmp, k)
                         im.save(fullpath)
+                    
 
     def gen_example(self, data_dic):
         if cfg.TRAIN.NET_G == '':
             print('Error: the path for morels is not found!')
         else:
             # Build and load the generator
-            text_encoder = \
-                RNN_ENCODER(self.n_words, nhidden=cfg.TEXT.EMBEDDING_DIM)
+            text_encoder = TEXT_TRANSFORMER_ENCODERv2(emb=cfg.TEXT.EMBEDDING_DIM
+                                            ,heads=8
+                                            ,depth=1
+                                            ,seq_length=cfg.TEXT.WORDS_NUM
+                                            ,num_tokens=self.n_words)
             state_dict = \
                 torch.load(cfg.TRAIN.NET_E, map_location=lambda storage, loc: storage)
             text_encoder.load_state_dict(state_dict)
@@ -474,10 +569,10 @@ class condGANTrainer(object):
                     #######################################################
                     # (1) Extract text embeddings
                     ######################################################
-                    hidden = text_encoder.init_hidden(batch_size)
+#                     hidden = text_encoder.init_hidden(batch_size)
                     # words_embs: batch_size x nef x seq_len
                     # sent_emb: batch_size x nef
-                    words_embs, sent_emb = text_encoder(captions, cap_lens, hidden)
+                    words_embs, sent_emb = text_encoder(captions)#, cap_lens, hidden)
                     mask = (captions == 0)
                     #######################################################
                     # (2) Generate fake images
