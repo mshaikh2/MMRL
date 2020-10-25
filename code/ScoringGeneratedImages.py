@@ -1,6 +1,6 @@
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
+import numpy as np
 from math import floor
 from numpy import ones
 from numpy import expand_dims
@@ -8,7 +8,11 @@ from numpy import log
 from numpy import mean
 from numpy import std
 from numpy import exp
-from numpy.random import shuffle
+from numpy import cov
+from numpy import trace
+from numpy import iscomplexobj
+from scipy.linalg import sqrtm
+
 from keras.applications.inception_v3 import InceptionV3
 from keras.applications.inception_v3 import preprocess_input
 # import tensorflow as tf
@@ -21,6 +25,46 @@ config.gpu_options.allow_growth = True  # dynamically grow the memory used on th
 config.log_device_placement = True  # to log device placement (on which device the operation ran)
 sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
+
+class frechetInceptionDistance(object):
+    def __init__(self,mu1=[],sigma1=[]):
+        self.model = InceptionV3(include_top=False, pooling='avg', input_shape=(299,299,3))
+        self.mu1 = np.array(mu1)
+        self.sigma1 = np.array(sigma1)
+    def get_real_img_stats(self,images1):
+#         self.images1 = images1.astype('float32')
+        images1 = preprocess_input(images1)
+        print('preprocess complete, new shape:',images1.shape)
+        act1 = self.model.predict(images1)
+        print('prediction complete, act1 shape:',act1.shape)
+        self.mu1, self.sigma1 = act1.mean(axis=0), cov(act1, rowvar=False)
+        print('mu1 sigma1 shape:',self.mu1.shape,self.sigma1.shape)
+        return self.mu1, self.sigma1
+    def calculate_fid(self, images2=None, do_prepocess = False):
+#         images2 = images2.astype('float32')
+        if do_prepocess:
+            images2 = preprocess_input(images2)        
+        act2 = self.model.predict(images2)
+        # calculate mean and covariance statistics        
+        mu2, sigma2 = act2.mean(axis=0), cov(act2, rowvar=False)
+        # calculate sum squared difference between means
+        ssdiff = np.sum((self.mu1 - mu2)**2.0)
+        # calculate sqrt of product between cov
+        covmean = sqrtm(self.sigma1.dot(sigma2))
+        # check and correct imaginary numbers from sqrt
+        if iscomplexobj(covmean):
+            covmean = covmean.real
+        # calculate score
+        fid = ssdiff + trace(self.sigma1 + sigma2 - 2.0 * covmean)
+        return fid
+    def scale_images(self, images=None, new_shape=None):
+        images_list = list()
+        for image in images:
+            # resize with nearest neighbor interpolation
+            new_image = resize(image, new_shape, 0)
+            # store
+            images_list.append(new_image)
+        return asarray(images_list)
 
 class inceptionScore(object):
     def __init__(self):
