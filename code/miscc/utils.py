@@ -225,6 +225,7 @@ def build_super_images2(real_imgs, captions, cap_lens, ixtoword,
     text_map = np.asarray(text_map).astype(np.uint8)
 
     bUpdate = 1
+#     print('here')
     for i in range(num):
         attn = attn_maps[i].cpu().view(1, -1, att_sze, att_sze)
         #
@@ -241,6 +242,7 @@ def build_super_images2(real_imgs, captions, cap_lens, ixtoword,
         row_txt = []
         row_beforeNorm = []
         conf_score = []
+#         print('here0')
         for j in range(num_attn):
             one_map = attn[j]
             mask0 = one_map > (2. * thresh)
@@ -250,22 +252,27 @@ def build_super_images2(real_imgs, captions, cap_lens, ixtoword,
             if (vis_size // att_sze) > 1:
                 one_map = \
                     skimage.transform.pyramid_expand(one_map, sigma=20,
-                                                     upscale=vis_size // att_sze)
+                                                     upscale=vis_size // att_sze
+                                                    ,multichannel=True)
             minV = one_map.min()
             maxV = one_map.max()
             one_map = (one_map - minV) / (maxV - minV)
             row_beforeNorm.append(one_map)
         sorted_indices = np.argsort(conf_score)[::-1]
-
+#         print('here1')
         for j in range(num_attn):
             one_map = row_beforeNorm[j]
             one_map *= 255
+#             print('here2')
             #
             PIL_im = Image.fromarray(np.uint8(img))
+#             print('here3')
             PIL_att = Image.fromarray(np.uint8(one_map))
+#             print('here4')
             merged = \
                 Image.new('RGBA', (vis_size, vis_size), (0, 0, 0, 0))
             mask = Image.new('L', (vis_size, vis_size), (180))  # (210)
+            
             merged.paste(PIL_im, (0, 0))
             merged.paste(PIL_att, (0, 0), mask)
             merged = np.array(merged)[:, :, :3]

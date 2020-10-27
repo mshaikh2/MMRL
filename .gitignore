@@ -4,3 +4,4 @@ notebooks/__pycache__
 output/*
 notebooks/.ipynb_checkpoints
 tensorboard/*
+gen_images_test/*

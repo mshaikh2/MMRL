@@ -543,7 +543,7 @@ class condGANTrainer(object):
                 netG = G_DCGAN()
             else:
                 netG = G_NET()
-            s_tmp = cfg.TRAIN.NET_G[:cfg.TRAIN.NET_G.rfind('.pth')]
+            s_tmp = '../gen_images_test'#cfg.TRAIN.NET_G[:cfg.TRAIN.NET_G.rfind('.pth')]
             model_dir = cfg.TRAIN.NET_G
             state_dict = \
                 torch.load(model_dir, map_location=lambda storage, loc: storage)

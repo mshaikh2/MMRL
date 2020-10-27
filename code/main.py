@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torchvision.transforms as transforms
-
+import pickle
 dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
 sys.path.append(dir_path)
 
@@ -42,13 +42,13 @@ def gen_example(wordtoix, algo):
     from nltk.tokenize import RegexpTokenizer
     filepath = '%s/example_filenames.txt' % (cfg.DATA_DIR)
     data_dic = {}
-    with open(filepath, "r") as f:
+    with open(filepath, "rb") as f:
         filenames = f.read().decode('utf8').split('\n')
         for name in filenames:
             if len(name) == 0:
                 continue
             filepath = '%s/%s.txt' % (cfg.DATA_DIR, name)
-            with open(filepath, "r") as f:
+            with open(filepath, "rb") as f:
                 print('Load from:', name)
                 sentences = f.read().decode('utf8').split('\n')
                 # a list of indices for a sentence
@@ -84,6 +84,10 @@ def gen_example(wordtoix, algo):
                 cap_array[i, :c_len] = cap
             key = name[(name.rfind('/') + 1):]
             data_dic[key] = [cap_array, cap_lens, sorted_indices]
+    
+#     filename = '../data/coco/data_dic.pickle'
+#     with open(filename , 'wb') as f:
+#         val_imgs_stats = pickle.dump(data_dic,f)
     algo.gen_example(data_dic)
 
 
@@ -170,6 +174,7 @@ if __name__ == "__main__":
                         algo.sampling(split_dir,full_netGpath)  # generate images for the whole valid dataset
                     counter+=1
         else:
+            print('gen_example')
             gen_example(dataset.wordtoix, algo)  # generate images for customized captions
     end_t = time.time()
     print('Total time for training:', end_t - start_t)

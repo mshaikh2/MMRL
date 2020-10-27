@@ -9,14 +9,14 @@ WORKERS: 4
 TREE:
     BRANCH_NUM: 3
 
-# B_VALIDATION: True
+B_VALIDATION: False
 
 TRAIN:
     FLAG: True
-    NET_G: '../output/coco_glu-gan2_2020_10_13_23_16_32/Model/netG_epoch_120.pth'
+    NET_G: '../output/coco_glu-gan2_2020_10_25_15_48_15/Model/netG_epoch_130.pth'
     B_NET_D: True
     BATCH_SIZE: 14  # 32
-    MAX_EPOCH: 130
+    MAX_EPOCH: 150
     SNAPSHOT_INTERVAL: 2
     DISCRIMINATOR_LR: 0.0002
     GENERATOR_LR: 0.0002
