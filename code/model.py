@@ -345,7 +345,81 @@ class RNN_ENCODER(nn.Module):
         sent_emb = sent_emb.view(-1, self.nhidden * self.num_directions)
         return words_emb, sent_emb
 
+class CNN_ENCODER_BASE(nn.Module):
+    def __init__(self):
+        super(CNN_ENCODER_BASE, self).__init__()
+        model = models.inception_v3()
+        url = 'https://download.pytorch.org/models/inception_v3_google-1a9a5a14.pth'
+        model.load_state_dict(model_zoo.load_url(url))
+        for param in model.parameters():
+            param.requires_grad = False
+        print('Load pretrained model from ', url)
+        # print(model)
 
+        self.define_module(model)
+
+    def define_module(self, model):
+        self.Conv2d_1a_3x3 = model.Conv2d_1a_3x3
+        self.Conv2d_2a_3x3 = model.Conv2d_2a_3x3
+        self.Conv2d_2b_3x3 = model.Conv2d_2b_3x3
+        self.Conv2d_3b_1x1 = model.Conv2d_3b_1x1
+        self.Conv2d_4a_3x3 = model.Conv2d_4a_3x3
+        self.Mixed_5b = model.Mixed_5b
+        self.Mixed_5c = model.Mixed_5c
+        self.Mixed_5d = model.Mixed_5d
+        self.Mixed_6a = model.Mixed_6a
+        self.Mixed_6b = model.Mixed_6b
+        self.Mixed_6c = model.Mixed_6c
+        self.Mixed_6d = model.Mixed_6d
+        self.Mixed_6e = model.Mixed_6e
+        self.Mixed_7a = model.Mixed_7a
+        self.Mixed_7b = model.Mixed_7b
+        self.Mixed_7c = model.Mixed_7c
+    
+    def forward(self, x):
+        features = None
+        # --> fixed-size input: batch x 3 x 299 x 299
+        x = nn.Upsample(size=(299, 299), mode='bilinear')(x)
+        # 299 x 299 x 3
+        x = self.Conv2d_1a_3x3(x)
+        # 149 x 149 x 32
+        x = self.Conv2d_2a_3x3(x)
+        # 147 x 147 x 32
+        x = self.Conv2d_2b_3x3(x)
+        # 147 x 147 x 64
+        x = F.max_pool2d(x, kernel_size=3, stride=2)
+        # 73 x 73 x 64
+        x = self.Conv2d_3b_1x1(x)
+        # 73 x 73 x 80
+        x = self.Conv2d_4a_3x3(x)
+        # 71 x 71 x 192
+
+        x = F.max_pool2d(x, kernel_size=3, stride=2)
+        # 35 x 35 x 192
+        x = self.Mixed_5b(x)
+        # 35 x 35 x 256
+        x = self.Mixed_5c(x)
+        # 35 x 35 x 288
+        x = self.Mixed_5d(x)
+        # 35 x 35 x 288
+
+        x = self.Mixed_6a(x)
+        # 17 x 17 x 768
+        x = self.Mixed_6b(x)
+        # 17 x 17 x 768
+        x = self.Mixed_6c(x)
+        # 17 x 17 x 768
+        x = self.Mixed_6d(x)
+        # 17 x 17 x 768
+        x = self.Mixed_6e(x)
+        # 17 x 17 x 768
+
+        # image region features
+        features = x
+        
+        return features
+    
+    
 class CNN_ENCODER(nn.Module):
     def __init__(self, nef):
         super(CNN_ENCODER, self).__init__()
