@@ -24,26 +24,8 @@ import pickle
 dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
 sys.path.append(dir_path)
 
-import torch
-from torch.utils.data import DataLoader
-import torch.backends.cudnn as cudnn
-
-import numpy as np
-import time
-import sys
-import os
-import math
-import tqdm
-import timeit
-from datetime import datetime
-import dateutil.tz
-
-from catr.models import utils, caption
-from catr.datasets import coco
-from catr.cfg_damsm_bert import Config
-# from catr.engine import train_one_epoch, evaluate
-
-from torch.utils.tensorboard import SummaryWriter
+from catr.cfg_damsm_bert import Config ## add catr config file here
+config  = Config()
 
 
 def parse_args():
@@ -155,13 +137,14 @@ if __name__ == "__main__":
         transforms.RandomHorizontalFlip()])
     dataset = TextDataset(cfg.DATA_DIR, split_dir,
                           base_size=cfg.TREE.BASE_SIZE,
-                          transform=image_transform)
+                          transform=image_transform,
+                          max_length=config.max_position_embeddings, 
+                          vocab=config.vocab)
     assert dataset
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=cfg.TRAIN.BATCH_SIZE,
         drop_last=True, shuffle=bshuffle, num_workers=int(cfg.WORKERS))
 
-    
 #     dataset_val = TextDataset(cfg.DATA_DIR, 'test',
 #                               base_size=cfg.TREE.BASE_SIZE,
 #                               transform=image_transform)

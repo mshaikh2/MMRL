@@ -40,7 +40,7 @@ from catr.datasets import coco
 from catr.cfg_damsm_bert import Config
 # from catr.engine import train_one_epoch, evaluate
 
-config = Config()
+config = Config() # initialize catr config here
 
 # ################# Text to image task############################ #
 class condGANTrainer(object):
@@ -146,7 +146,7 @@ class condGANTrainer(object):
                     netsD[i].load_state_dict(state_dict)
         # ########################################################## #
 #         config = Config()
-        cap_model, criterion = caption.build_model_v3(config)
+        cap_model = caption.build_model_v3(config)
         print("Initializing from Checkpoint...")
         cap_model_path = cfg.TRAIN.NET_E.replace('text_encoder', 'cap_model')
         if os.path.exists(cap_model_path):
@@ -223,13 +223,14 @@ class condGANTrainer(object):
             torch.save(netD.state_dict(),
                 '%s/netD%d.pth' % (self.model_dir, i))
         print('Save G/Ds models.')
-        #
+        # save caption model here
         torch.save({
             'model': cap_model.state_dict(),
             'optimizer': optimizerC.state_dict(),
             'lr_scheduler': lr_schedulerC.state_dict(),
         }, '%s/cap_model%d.pth' % (self.model_dir, epoch))
 
+        
     def set_requires_grad_value(self, models_list, brequires):
         for i in range(len(models_list)):
             for p in models_list[i].parameters():
@@ -280,6 +281,8 @@ class condGANTrainer(object):
 #         IS_std_value = np.mean(IS_std)
 
         return 0.0,0.0 #IS_mean_value, IS_std_value
+
+
     def save_img_results(self, netG, noise, sent_emb, words_embs, mask,
                          image_encoder, captions, cap_lens,
                          gen_iterations, name='current'):
@@ -321,6 +324,7 @@ class condGANTrainer(object):
                 % (self.image_dir, name, gen_iterations)
             im.save(fullpath)
 
+            
     def train(self):
         now = datetime.datetime.now(dateutil.tz.tzlocal())
         timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
@@ -358,7 +362,13 @@ class condGANTrainer(object):
                 # (1) Prepare training data and Compute text embeddings
                 ######################################################
                 data = data_iter.next()
-                imgs, captions, cap_lens, class_ids, keys = prepare_data(data)
+                # add images, image masks, captions, caption masks for catr model
+                imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
+                
+                ################## feedforward image encoder and caption model ##################
+                v_features, cnn_code = image_encoder(cap_imgs) # input catr images to image encoder, feedforward, Nx256x17x17
+                cap_preds = cap_model(v_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
+                #################################################################################
 
 #                 hidden = text_encoder.init_hidden(batch_size)
                 # words_embs: batch_size x nef x seq_len
