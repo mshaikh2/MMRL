@@ -5,3 +5,11 @@ output/*
 notebooks/.ipynb_checkpoints
 tensorboard/*
 gen_images_test/*
+code/catr/checkpoints/*
+plots/*
+code/catr/.ipynb_checkpoints
+code/catr/__pycache__
+code/catr/tenserboard/*
+code/catr/results/*
+code/catr/coco
+code/catr/checkpoint_v3.pth
