@@ -25,7 +25,7 @@ from model import G_DCGAN, G_NET
 from datasets import prepare_data
 from model import TEXT_TRANSFORMER_ENCODERv2, CNN_ENCODER
 # from InceptionScore import calculate_inception_score
-from miscc.losses import words_loss
+from miscc.losses import sent_loss, words_loss
 from miscc.losses import discriminator_loss, generator_loss, KL_loss
 
 from torch.utils.tensorboard import SummaryWriter
@@ -40,8 +40,15 @@ from catr.datasets import coco
 from catr.cfg_damsm_bert import Config
 # from catr.engine import train_one_epoch, evaluate
 
-config = Config() # initialize catr config here
+from transformers import BertTokenizer
+from nltk.tokenize import RegexpTokenizer
 
+config = Config() # initialize catr config here
+tokenizer = BertTokenizer.from_pretrained(config.vocab, do_lower=True)
+retokenizer = BertTokenizer.from_pretrained("catr/damsm_vocab.txt", do_lower=True)
+# reg_tokenizer = RegexpTokenizer(r'\w+')
+frozen_list_image_encoder = ['Conv2d_1a_3x3','Conv2d_2a_3x3','Conv2d_2b_3x3','Conv2d_3b_1x1','Conv2d_4a_3x3']
+            
 # ################# Text to image task############################ #
 class condGANTrainer(object):
     def __init__(self, output_dir, data_loader, n_words, ixtoword):
@@ -70,16 +77,22 @@ class condGANTrainer(object):
             print('Error: no pretrained text-image encoders')
             return
 
+        ####################################################################
         image_encoder = CNN_ENCODER(cfg.TEXT.EMBEDDING_DIM)
         img_encoder_path = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
         state_dict = \
             torch.load(img_encoder_path, map_location=lambda storage, loc: storage)
         image_encoder.load_state_dict(state_dict)
-        for p in image_encoder.parameters():
-            p.requires_grad = False
+        for p in image_encoder.parameters(): # make image encoder grad on
+            p.requires_grad = True
+        for k,v in image_encoder.named_children(): # freeze the layer1-5 (set eval for BNlayer)
+            if k in frozen_list_image_encoder:
+                v.train(False)
+                v.requires_grad_(False)
         print('Load image encoder from:', img_encoder_path)
-        image_encoder.eval()
+#         image_encoder.eval()
 
+        ###################################################################
         text_encoder = TEXT_TRANSFORMER_ENCODERv2(emb=cfg.TEXT.EMBEDDING_DIM
                                             ,heads=8
                                             ,depth=1
@@ -92,9 +105,9 @@ class condGANTrainer(object):
                        map_location=lambda storage, loc: storage)
         text_encoder.load_state_dict(state_dict)
         for p in text_encoder.parameters():
-            p.requires_grad = False
+            p.requires_grad = True
         print('Load text encoder from:', cfg.TRAIN.NET_E)
-        text_encoder.eval()
+#         text_encoder.eval()
 
         # #######################generator and discriminators############## #
         netsD = []
@@ -149,12 +162,16 @@ class condGANTrainer(object):
         cap_model = caption.build_model_v3(config)
         print("Initializing from Checkpoint...")
         cap_model_path = cfg.TRAIN.NET_E.replace('text_encoder', 'cap_model')
+        
         if os.path.exists(cap_model_path):
+            print('Load C from: {0}'.format(cap_model_path))
             state_dict = \
                 torch.load(cap_model_path, map_location=lambda storage, loc: storage)
             cap_model.load_state_dict(state_dict['model'])
         else:
-            checkv3 = torch.load('catr/checkpoints/catr_damsm256_proj_coco2014_ep02.pth', map_location='cpu')
+            base_line_path = 'catr/checkpoints/catr_damsm256_proj_coco2014_ep02.pth'
+            print('Load C from: {0}'.format(base_line_path))
+            checkv3 = torch.load(base_line_path, map_location='cpu')
             cap_model.load_state_dict(checkv3['model'], strict=False)
         
         # ########################################################### #
@@ -167,7 +184,43 @@ class condGANTrainer(object):
                 netsD[i].cuda()
         return [text_encoder, image_encoder, netG, netsD, epoch, cap_model]
 
-    def define_optimizers(self, netG, netsD, cap_model):
+    def define_optimizers(self, image_encoder, text_encoder, netG, netsD, cap_model):
+        
+        #################################
+        img_encoder_path = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
+        print('\n\n CNN Encoder parameters that do not require grad are:')
+        paraI = []
+        for k,v in image_encoder.named_parameters():
+            if v.requires_grad:
+                paraI.append(v)
+            else:
+                print(k)
+        optimizerI = torch.optim.Adam(paraI
+                                           , lr=1e-5
+                                           , weight_decay=config.weight_decay)
+        lr_schedulerI = torch.optim.lr_scheduler.StepLR(optimizerI
+                                                            , config.lr_drop)
+#         if os.path.exists(img_encoder_path):
+#             state_dict = \
+#                 torch.load(img_encoder_path, map_location=lambda storage, loc: storage)
+#             optimizerI.load_state_dict(state_dict['optimizer'])
+#             lr_schedulerI.load_state_dict(state_dict['lr_scheduler'])
+        #################################
+        text_encoder_path = cfg.TRAIN.NET_E
+        optimizerT = torch.optim.Adam(text_encoder.parameters()
+                                           , lr=1e-5
+                                           , weight_decay=config.weight_decay)
+        lr_schedulerT = torch.optim.lr_scheduler.StepLR(optimizerT
+                                                            , config.lr_drop)
+#         if os.path.exists(text_encoder_path):
+#             state_dict = \
+#                 torch.load(text_encoder_path, map_location=lambda storage, loc: storage)
+#             optimizerI.load_state_dict(state_dict['optimizer'])
+#             lr_schedulerI.load_state_dict(state_dict['lr_scheduler'])
+        
+            
+        
+        ##################################################
         optimizersD = []
         num_Ds = len(netsD)
         for i in range(num_Ds):
@@ -175,11 +228,11 @@ class condGANTrainer(object):
                              lr=cfg.TRAIN.DISCRIMINATOR_LR,
                              betas=(0.5, 0.999))
             optimizersD.append(opt)
-
+        ##################################################
         optimizerG = optim.Adam(netG.parameters(),
                                 lr=cfg.TRAIN.GENERATOR_LR,
                                 betas=(0.5, 0.999))
-        # ############################################### #
+        # ################## CAPTION model here ################# #
         param_dicts = [
             {"params": [p for n, p in cap_model.named_parameters(
             ) if "backbone" not in n and p.requires_grad]},
@@ -188,16 +241,30 @@ class condGANTrainer(object):
 #                 "lr": config.lr_backbone,
 #             },
         ]
-        optimizerC = torch.optim.AdamW(
-            param_dicts, lr=config.lr, weight_decay=config.weight_decay)
-        lr_schedulerC = torch.optim.lr_scheduler.StepLR(optimizerC, config.lr_drop)
+        
+        optimizerC = torch.optim.AdamW(param_dicts
+                                           , lr=config.lr
+                                           , weight_decay=config.weight_decay)
+        lr_schedulerC = torch.optim.lr_scheduler.StepLR(optimizerC
+                                                        , config.lr_drop)
+        cap_model_path = cfg.TRAIN.NET_E.replace('text_encoder', 'cap_model')
         if os.path.exists(cap_model_path):
+            print('Loading optimzerC from checkpoints ...')
             state_dict = \
-                torch.load(cap_model_path, map_location=lambda storage, loc: storage)
+                torch.load(cap_model_path
+                           , map_location=lambda storage
+                           , loc: storage)
             optimizerC.load_state_dict(state_dict['optimizer'])
             lr_schedulerC.load_state_dict(state_dict['lr_scheduler'])
 
-        return optimizerG, optimizersD, optimizerC, lr_schedulerC
+        return (optimizerI
+                , optimizerT
+                , optimizerG
+                , optimizersD
+                , optimizerC
+                , lr_schedulerC
+                , lr_schedulerI
+                , lr_schedulerT)
 
     def prepare_labels(self):
         batch_size = self.batch_size
@@ -211,17 +278,28 @@ class condGANTrainer(object):
 
         return real_labels, fake_labels, match_labels
 
-    def save_model(self, netG, avg_param_G, netsD, epoch, cap_model, optimizerC, lr_schedulerC):
+    def save_model(self, netG, avg_param_G, image_encoder, text_encoder, netsD, epoch, cap_model, optimizerC, optimizerI, optimizerT, lr_schedulerC, lr_schedulerI, lr_schedulerT, optimizerG, optimizersD):
         backup_para = copy_G_params(netG)
         load_params(netG, avg_param_G)
-        torch.save(netG.state_dict(),
-            '%s/netG_epoch_%d.pth' % (self.model_dir, epoch))
+        
+        
+        
+        torch.save(({
+            'model': netG.state_dict(),
+            'optimizer': optimizerG.state_dict()
+        }, '%s/netG_epoch_%d.pth' % (self.model_dir, epoch)))
+        
         load_params(netG, backup_para)
         #
         for i in range(len(netsD)):
             netD = netsD[i]
-            torch.save(netD.state_dict(),
-                '%s/netD%d.pth' % (self.model_dir, i))
+            optD = optimizersD[i]           
+            
+            torch.save(({
+                'model': netD.state_dict(),
+                'optimizer': optD.state_dict()
+            }, '%s/netD%d.pth' % (self.model_dir, i)))
+            
         print('Save G/Ds models.')
         # save caption model here
         torch.save({
@@ -231,56 +309,26 @@ class condGANTrainer(object):
         }, '%s/cap_model%d.pth' % (self.model_dir, epoch))
 
         
+        # save image encoder model here
+        torch.save({
+            'model': image_encoder.state_dict(),
+            'optimizer': optimizerI.state_dict(),
+            'lr_scheduler': lr_schedulerI.state_dict(),
+        }, '%s/image_encoder%d.pth' % (self.model_dir, epoch))
+
+        
+        # save text encoder model here
+        torch.save({
+            'model': text_encoder.state_dict(),
+            'optimizer': optimizerT.state_dict(),
+            'lr_scheduler': lr_schedulerT.state_dict(),
+        }, '%s/text_encoder%d.pth' % (self.model_dir, epoch))
+
+        
     def set_requires_grad_value(self, models_list, brequires):
         for i in range(len(models_list)):
             for p in models_list[i].parameters():
                 p.requires_grad = brequires
-
-                
-    def evaluate(self, dataloader, netG, trx_model):
-        netG.eval()
-        trx_model.eval()
-        IS_mean = []
-        IS_std = []
-        for step, data in enumerate(dataloader, 0):
-#             torch.cuda.empty_cache()
-#             torch.cuda.reset_max_memory_cached()
-            print('val step:{:6d}|{:3d}'.format(step,len(dataloader)))
-            real_imgs, captions, cap_lens, \
-                    class_ids, keys = prepare_data(data)
-            nz = cfg.GAN.Z_DIM
-            batch_size = real_imgs[-1].size()[0]
-            print('val batch_size:{0}'.format(batch_size))
-            noise = Variable(torch.FloatTensor(batch_size, nz))
-           
-            fixed_noise = Variable(torch.FloatTensor(batch_size, nz).normal_(0, 1))
-            if cfg.CUDA:
-                noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
-            print('vars initialized...')
-            words_emb, sent_emb = trx_model(captions)
-            words_embs, sent_emb = words_emb.detach(), sent_emb.detach()
-            mask = (captions == 0)
-            num_words = words_embs.size(2)
-            if mask.size(1) > num_words:
-                mask = mask[:, :num_words]
-            
-            noise.data.normal_(0, 1)
-            print('eval initialized...')
-            fake_imgs, _, mu, logvar = netG(noise, sent_emb, words_embs, mask)
-            _, mu, logvar = _[-1].detach().cpu(), mu[-1].detach().cpu(), logvar[-1].detach().cpu()
-            f_img = np.asarray(fake_imgs[-1].permute((0,2,3,1)).detach().cpu())
-            print('eval done.')
-#             print('val f_img.shape:{0}'.format(f_img.shape))
-#             mu,sigma = calculate_inception_score(f_img)
-#             IS_mean.append(mu)
-#             IS_std.append(sigma)
-#             if step == 5:
-#                 break
-
-#         IS_mean_value = np.mean(IS_mean)
-#         IS_std_value = np.mean(IS_std)
-
-        return 0.0,0.0 #IS_mean_value, IS_std_value
 
 
     def save_img_results(self, netG, noise, sent_emb, words_embs, mask,
@@ -326,6 +374,7 @@ class condGANTrainer(object):
 
             
     def train(self):
+        
         now = datetime.datetime.now(dateutil.tz.tzlocal())
         timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
 
@@ -333,22 +382,65 @@ class condGANTrainer(object):
         mkdir_p(tb_dir)
         tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
 
-        
         text_encoder, image_encoder, netG, netsD, start_epoch, cap_model = self.build_models()
+        labels = Variable(torch.LongTensor(range(self.batch_size))) # used for matching loss
+        text_encoder.train()
+        image_encoder.train()
+        for k,v in image_encoder.named_children(): # set the input layer1-5 not training and no grads.
+            if k in frozen_list_image_encoder:
+                v.training = False
+                v.requires_grad_(False)
+        netG.train()
+        for i in range(len(netsD)):
+            netsD[i].train()
+        cap_model.train()
+
+
+        
         avg_param_G = copy_G_params(netG)
-        optimizerG, optimizersD, optimizerC, lr_schedulerC = self.define_optimizers(netG, netsD)
+        optimizerI, optimizersT, optimizerG , optimizersD , optimizerC , lr_schedulerC \
+        , lr_schedulerI , lr_schedulerT = self.define_optimizers(image_encoder
+                                                                , text_encoder
+                                                                , netG
+                                                                , netsD
+                                                                , cap_model)
         real_labels, fake_labels, match_labels = self.prepare_labels()
 
         batch_size = self.batch_size
         nz = cfg.GAN.Z_DIM
         noise = Variable(torch.FloatTensor(batch_size, nz))
         fixed_noise = Variable(torch.FloatTensor(batch_size, nz).normal_(0, 1))
+        
+        cap_criterion = torch.nn.CrossEntropyLoss() # add caption criterion here
         if cfg.CUDA:
             noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
+            cap_criterion = cap_criterion.cuda() # add caption criterion here
+        cap_criterion.train()
 
         gen_iterations = 0
         # gen_iterations = start_epoch * self.num_batches
         for epoch in range(start_epoch, self.max_epoch):
+            
+            ##### set everything to trainable ####
+            text_encoder.train()
+            image_encoder.train()
+            netG.train()
+            cap_model.train()
+            for k,v in image_encoder.named_children():
+                if k in frozen_list_image_encoder:
+                    v.train(False)
+            for i in range(len(netsD)):
+                netsD[i].train()
+            ##### set everything to trainable ####
+            
+            
+            
+            s_total_loss0 = 0
+            s_total_loss1 = 0
+            w_total_loss0 = 0
+            w_total_loss1 = 0
+            c_total_loss = 0
+            
             start_t = time.time()
 
             data_iter = iter(self.data_loader)
@@ -365,21 +457,54 @@ class condGANTrainer(object):
                 # add images, image masks, captions, caption masks for catr model
                 imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
                 
-                ################## feedforward image encoder and caption model ##################
-                v_features, cnn_code = image_encoder(cap_imgs) # input catr images to image encoder, feedforward, Nx256x17x17
-                cap_preds = cap_model(v_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
-                #################################################################################
-
-#                 hidden = text_encoder.init_hidden(batch_size)
+                ################## feedforward damsm model ##################
+                image_encoder.zero_grad() # image/text encoders zero_grad here
+                text_encoder.zero_grad()
+                
+                words_features, sent_code = image_encoder(cap_imgs) # input catr images to image encoder, feedforward, Nx256x17x17
+#                 words_features, sent_code = image_encoder(imgs[-1]) # input image_encoder
+                nef, att_sze = words_features.size(1), words_features.size(2)
+                # hidden = text_encoder.init_hidden(batch_size)
                 # words_embs: batch_size x nef x seq_len
                 # sent_emb: batch_size x nef
                 words_embs, sent_emb = text_encoder(captions)#, cap_lens, hidden)
+                
+                #### damsm losses
+                w_loss0, w_loss1, attn_maps = words_loss(words_features, words_embs, labels,
+                                                 cap_lens, class_ids, batch_size)
+                w_total_loss0 += w_loss0.data
+                w_total_loss1 += w_loss1.data
+                damsm_loss = w_loss0 + w_loss1
+                
+                s_loss0, s_loss1 = sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
+                s_total_loss0 += s_loss0.data
+                s_total_loss1 += s_loss1.data
+                damsm_loss += s_loss0 + s_loss1
+                
+                damsm_loss.backward() 
+                # real image real text matching loss graph cleared here
+                # grad accumulated -> text_encoder 
+                #                  -> image_encoder 
+                #################################################################################
+                
+                ################## feedforward image encoder and caption model ##################
+                cap_model.zero_grad() # caption model zero_grad here
+                cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
+                cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
+                c_total_loss += cap_loss.item()
+                cap_loss.backward() # caption loss graph cleared, 
+                # grad accumulated -> cap_model -> image_encoder 
+                torch.nn.utils.clip_grad_norm_(cap_model.parameters(),
+                                      config.clip_max_norm)
+                optimizerC.step() # update cap_model params
+                #################################################################################
+                
+                ############ Prepare the input to Gan from the output of text_encoder ################
                 words_embs, sent_emb = words_embs.detach(), sent_emb.detach()
                 mask = (captions == 0)
                 num_words = words_embs.size(2)
                 if mask.size(1) > num_words:
                     mask = mask[:, :num_words]
-
                 #######################################################
                 # (2) Generate fake images
                 ######################################################
@@ -429,6 +554,8 @@ class condGANTrainer(object):
                 for p, avg_p in zip(netG.parameters(), avg_param_G):
                     avg_p.mul_(0.999).add_(0.001, p.data)
 
+                    
+                # 14 -- 2800 iterations=steps for 1 epoch    
                 if gen_iterations % 100 == 0:
                     print(D_logs + '\n' + G_logs)
                 # save images
@@ -448,10 +575,113 @@ class condGANTrainer(object):
                 #### temporary check ####
 #                 if step == 5:
 #                     break
+                print('fake_img shape:',fake_imgs[-1].size())
+    
+                ####### fake imge real text matching loss #################
+                fi_word_features, fi_sent_code = image_encoder(fake_imgs[-1])
+                
+            
+                fi_w_loss0, fi_w_loss1, fi_attn_maps = words_loss(fi_word_features, words_emb, labels,
+                                                 cap_lens, class_ids, batch_size)
+        
+                fi_w_total_loss0 += fi_w_loss0.data
+                fi_w_total_loss1 += fi_w_loss1.data
+                
+                fi_damsm_loss = fi_w_loss0 + fi_w_loss1
+                
+                fi_s_loss0, fi_s_loss1 = sent_loss(fi_sent_code, sent_emb, labels, class_ids, batch_size)
+                
+                fi_s_total_loss0 += fi_s_loss0.data
+                fi_s_total_loss1 += fi_s_loss1.data
+                
+                fi_damsm_loss += fi_s_loss0 + fi_s_loss1
+                
+        
+                fi_damsm_loss.backward()
+                
+                ###### real image fake text matching loss ##############
+                
+                fake_preds = torch.argmax(cap_preds, axis=-1) # capation predictions
+                fake_captions = tokenizer.batch_decode(fake_preds.tolist(), skip_special_tokens=True) # list of strings
+                fake_outputs = retokenizer.batch_encode_plus(
+                        fake_captions, max_length=64, padding='max_length', add_special_tokens=False,
+                        return_attention_mask=True, return_token_type_ids=False, truncation=True)
+                fake_tokens = fake_outputs['input_ids']
+#                 fake_tkmask = fake_outputs['attention_mask']
+                f_tokens = np.zeros((fake_tokens.shape[0], 15), dtype=np.int64)
+                f_cap_lens = []
+                cnt=0
+                for i in fake_tokens: 
+                    temp = np.array([x for x in i if x!=27299 and x!=0])
+                    num_words = len(temp)
+                    if num_words <= 15:
+                        f_tokens[cnt][:num_words] = temp
+                    else:
+                        ix = list(np.arange(num_words))  # 1, 2, 3,..., maxNum
+                        np.random.shuffle(ix)
+                        ix = ix[:15]
+                        ix = np.sort(ix)
+                        f_tokens[cnt] = temp[ix]
+                        num_words = 15
+                    f_cap_lens.append(num_words)
+                    cnt += 1
+                
+                f_tokens = torch.tensor(f_tokens).requires_grad_()
+                f_cap_lens = torch.tensor(f_cap_lens).requires_grad_()
+                if cfg.CUDA:
+                    f_tokens.cuda()
+                    f_cap_lens.cuda()           
+                    
+                ft_words_emb, ft_sent_emb = text_encoder(f_tokens) # input text_encoder
+                
+            
+                ft_w_loss0, ft_w_loss1, ft_attn_maps = words_loss(word_features, ft_words_emb, labels,
+                                                 f_cap_lens, class_ids, batch_size)
+        
+                ft_w_total_loss0 += ft_w_loss0.data
+                ft_w_total_loss1 += ft_w_loss1.data
+                
+                ft_damsm_loss = ft_w_loss0 + ft_w_loss1
+                
+                ft_s_loss0, ft_s_loss1 = sent_loss(sent_code, ft_sent_emb, labels, class_ids, batch_size)
+                
+                ft_s_total_loss0 += ft_s_loss0.data
+                ft_s_total_loss1 += ft_s_loss1.data
+                
+                ft_damsm_loss += ft_s_loss0 + ft_s_loss1                
+        
+                ft_damsm_loss.backward()
+                
+            
+                ## loss = 0.5*loss1 + 0.4*loss2 + ...
+                ## loss.backward() -> accumulate grad value in parameters.grad
+                
+                ## loss1 = 0.5*loss1
+                ## loss1.backward() 
+                    
+                torch.nn.utils.clip_grad_norm_(image_encoder.parameters(),
+                                      cfg.TRAIN.RNN_GRAD_CLIP)
+                    
+                optimizerI.step()
+                
+                torch.nn.utils.clip_grad_norm_(text_encoder.parameters(),
+                                      cfg.TRAIN.RNN_GRAD_CLIP)
+                optimizerT.step()
+                
+            lr_schedulerC.step()
+            lr_schedulerI.step()
+            lr_schedulerT.step()
+            
             end_t = time.time()
-
+            
             tbw.add_scalar('Loss_D', float(errD_total.item()), epoch)
             tbw.add_scalar('Loss_G', float(errG_total.item()), epoch)
+            tbw.add_scalar('train_w_loss0', float(w_total_loss0.item()), epoch)
+            tbw.add_scalar('train_s_loss0', float(s_total_loss0.item()), epoch)
+            tbw.add_scalar('train_w_loss1', float(w_total_loss1.item()), epoch)
+            tbw.add_scalar('train_s_loss1', float(s_total_loss1.item()), epoch)
+            tbw.add_scalar('train_c_loss', float(c_total_loss.item()), epoch)
+            
             print('''[%d/%d][%d]
                   Loss_D: %.2f Loss_G: %.2f Time: %.2fs'''
                   % (epoch, self.max_epoch, self.num_batches,
@@ -460,15 +690,64 @@ class condGANTrainer(object):
 
             if epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0:  # and epoch != 0:
                 
-                self.save_model(netG, avg_param_G, netsD, epoch, cap_model, optimizerC, lr_schedulerC)
+                self.save_model(netG, avg_param_G, image_encoder, text_encoder, netsD, epoch, cap_model, optimizerC, optimizerI, optimizerT, lr_schedulerC, lr_schedulerI, lr_schedulerT)
                 
                 
-#                 is_mean,is_std = self.evaluate(self.dataloader_val,netG,text_encoder)
-#                 print('is_mean:{:.5f}, is_std:{:.5f}'.format(is_mean,is_std))
-                
+            v_s_cur_loss, v_w_cur_loss, v_c_cur_loss = self.evaluate(self.dataloader_val, image_encoder, text_encoder, cap_model, self.batch_size)
+            print('v_s_cur_loss:{:.5f}, v_w_cur_loss:{:.5f}, v_c_cur_loss:{:.5f}'.format(v_s_cur_loss, v_w_cur_loss, v_c_cur_loss))
+            tbw.add_scalar('val_w_loss', float(v_w_cur_loss), epoch)
+            tbw.add_scalar('val_s_loss', float(v_s_cur_loss), epoch)
+            tbw.add_scalar('val_c_loss', float(v_c_cur_loss), epoch)
 
-        self.save_model(netG, avg_param_G, netsD, self.max_epoch, cap_model, optimizerC, lr_schedulerC)
+        self.save_model(netG, avg_param_G, image_encoder, text_encoder, netsD, self.max_epoch, cap_model, optimizerC, optimizerI, optimizerT, lr_schedulerC, lr_schedulerI, lr_schedulerT)
 
+    @torch.no_grad()
+    def evaluate(self, dataloader, cnn_model, trx_model, cap_model, batch_size):
+        cnn_model.eval()
+        trx_model.eval()
+        cap_model.eval() ### 
+        s_total_loss = 0
+        w_total_loss = 0
+        c_total_loss = 0 ###
+        ### add caption criterion here. #####
+        cap_criterion = torch.nn.CrossEntropyLoss() # add caption criterion here
+        if cfg.CUDA:
+            cap_criterion = cap_criterion.cuda() # add caption criterion here
+        cap_criterion.eval()
+        #####################################
+        for step, data in enumerate(dataloader, 0):
+            real_imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
+
+            words_features, sent_code = cnn_model(cap_imgs)
+
+            words_emb, sent_emb = trx_model(captions)
+            
+            ##### add catr here #####
+            cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
+
+            cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
+
+            c_total_loss += cap_loss.data
+            #########################
+
+            w_loss0, w_loss1, attn = words_loss(words_features, words_emb, labels,
+                                                cap_lens, class_ids, batch_size)
+            w_total_loss += (w_loss0 + w_loss1).data
+
+            s_loss0, s_loss1 = \
+                sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
+            s_total_loss += (s_loss0 + s_loss1).data
+
+#             if step == 50:
+#                 break
+
+        s_cur_loss = s_total_loss / step
+        w_cur_loss = w_total_loss / step
+        c_cur_loss = c_total_loss / step
+
+        return s_cur_loss, w_cur_loss, c_cur_loss
+        
+        
     def save_singleimages(self, images, filenames, save_dir,
                           split_dir, sentenceID=0):
         for i in range(images.size(0)):

@@ -212,3 +212,10 @@ def KL_loss(mu, logvar):
     KLD_element = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
     KLD = torch.mean(KLD_element).mul_(-0.5)
     return KLD
+
+
+####################CATR caption loss (XEloss)#####################
+def caption_loss(criterion, outputs, caps):
+    loss = criterion(outputs.permute(0, 2, 1), caps[:, 1:])
+    return loss
+    
