@@ -161,7 +161,7 @@ def discriminator_loss(netD, real_imgs, fake_imgs, conditions,
     return errD
 
 
-def generator_loss(netsD, image_encoder, fake_imgs, real_labels,
+def generator_loss(netsD, fake_imgs, real_labels,
                    words_embs, sent_emb, match_labels,
                    cap_lens, class_ids):
     numDs = len(netsD)
@@ -183,26 +183,27 @@ def generator_loss(netsD, image_encoder, fake_imgs, real_labels,
         # err_img = errG_total.data[0]
         logs += 'g_loss%d: %.2f ' % (i, g_loss.data)
 
-        # Ranking loss
-        if i == (numDs - 1):
-            # words_features: batch_size x nef x 17 x 17
-            # sent_code: batch_size x nef
-            region_features, cnn_code = image_encoder(fake_imgs[i])
-            w_loss0, w_loss1, _ = words_loss(region_features, words_embs,
-                                             match_labels, cap_lens,
-                                             class_ids, batch_size)
-            w_loss = (w_loss0 + w_loss1) * \
-                cfg.TRAIN.SMOOTH.LAMBDA
-            # err_words = err_words + w_loss.data[0]
+#         # Ranking loss
+#         if i == (numDs - 1):
+#             # words_features: batch_size x nef x 17 x 17
+#             # sent_code: batch_size x nef
+#             # fake img real text = updating gan+image encoder+<text encoder>
+#             region_features, cnn_code = image_encoder(fake_imgs[i])
+#             w_loss0, w_loss1, _ = words_loss(region_features, words_embs,
+#                                              match_labels, cap_lens,
+#                                              class_ids, batch_size)
+#             w_loss = (w_loss0 + w_loss1) * \
+#                 cfg.TRAIN.SMOOTH.LAMBDA
+#             # err_words = err_words + w_loss.data[0]
 
-            s_loss0, s_loss1 = sent_loss(cnn_code, sent_emb,
-                                         match_labels, class_ids, batch_size)
-            s_loss = (s_loss0 + s_loss1) * \
-                cfg.TRAIN.SMOOTH.LAMBDA
-            # err_sent = err_sent + s_loss.data[0]
+#             s_loss0, s_loss1 = sent_loss(cnn_code, sent_emb,
+#                                          match_labels, class_ids, batch_size)
+#             s_loss = (s_loss0 + s_loss1) * \
+#                 cfg.TRAIN.SMOOTH.LAMBDA
+#             # err_sent = err_sent + s_loss.data[0]
 
-            errG_total += w_loss + s_loss
-            logs += 'w_loss: %.2f s_loss: %.2f ' % (w_loss.data, s_loss.data)
+#             errG_total += w_loss + s_loss
+#             logs += 'w_loss: %.2f s_loss: %.2f ' % (w_loss.data, s_loss.data)
     return errG_total, logs
 
 

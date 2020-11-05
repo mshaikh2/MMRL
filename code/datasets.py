@@ -104,6 +104,7 @@ def prepare_data(data):
         s_masks = Variable(s_masks).cuda() # add s_masks here
         captions = Variable(captions).cuda()
         sorted_cap_lens = Variable(sorted_cap_lens).cuda()
+        
     else:
         cap_imgs = Variable(cap_imgs) # add cap_imgs here
         cap_img_masks = Variable(cap_img_masks) # add cap_img_masks here

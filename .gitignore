@@ -13,3 +13,4 @@ code/catr/tenserboard/*
 code/catr/results/*
 code/catr/coco
 code/catr/checkpoint_v3.pth
+code/.ipynb_checkpoints/*
