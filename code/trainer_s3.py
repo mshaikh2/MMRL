@@ -82,16 +82,16 @@ class condGANTrainer(object):
         ####################################################################
         image_encoder = CNN_ENCODER(cfg.TEXT.EMBEDDING_DIM)
         img_encoder_path = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
-        state_dict = \
-            torch.load(img_encoder_path, map_location=lambda storage, loc: storage)
-        image_encoder.load_state_dict(state_dict)
+        print('Load image encoder from:', img_encoder_path)
+        state_dict = torch.load(img_encoder_path, map_location='cpu')
+        image_encoder.load_state_dict(state_dict['model'])
         for p in image_encoder.parameters(): # make image encoder grad on
             p.requires_grad = True
         for k,v in image_encoder.named_children(): # freeze the layer1-5 (set eval for BNlayer)
             if k in frozen_list_image_encoder:
                 v.train(False)
                 v.requires_grad_(False)
-        print('Load image encoder from:', img_encoder_path)
+        
 #         image_encoder.eval()
 
         ###################################################################
@@ -103,12 +103,12 @@ class condGANTrainer(object):
 #         state_dict = torch.load(cfg.TRAIN.NET_E)
 #         text_encoder.load_state_dict(state_dict)
 #         print('Load ', cfg.TRAIN.NET_E)
-        state_dict = torch.load(cfg.TRAIN.NET_E,
-                       map_location=lambda storage, loc: storage)
-        text_encoder.load_state_dict(state_dict)
+        print('Load text encoder from:', cfg.TRAIN.NET_E)
+        state_dict = torch.load(cfg.TRAIN.NET_E,map_location='cpu')
+        text_encoder.load_state_dict(state_dict['model'])
         for p in text_encoder.parameters():
             p.requires_grad = True
-        print('Load text encoder from:', cfg.TRAIN.NET_E)
+        
 #         text_encoder.eval()
 
         # #######################generator and discriminators############## #
@@ -144,7 +144,7 @@ class condGANTrainer(object):
         if cfg.TRAIN.NET_G != '':
             state_dict = \
                 torch.load(cfg.TRAIN.NET_G, map_location=lambda storage, loc: storage)
-            netG.load_state_dict(state_dict)
+            netG.load_state_dict(state_dict['model'])
             print('Load G from: ', cfg.TRAIN.NET_G)
             istart = cfg.TRAIN.NET_G.rfind('_') + 1
             iend = cfg.TRAIN.NET_G.rfind('.')
@@ -156,9 +156,8 @@ class condGANTrainer(object):
                     s_tmp = Gname[:Gname.rfind('/')]
                     Dname = '%s/netD%d.pth' % (s_tmp, i)
                     print('Load D from: ', Dname)
-                    state_dict = \
-                        torch.load(Dname, map_location=lambda storage, loc: storage)
-                    netsD[i].load_state_dict(state_dict)
+                    state_dict = torch.load(Dname, map_location='cpu')
+                    netsD[i].load_state_dict(state_dict['model'])
         # ########################################################## #
 #         config = Config()
         cap_model = caption.build_model_v3(config)
@@ -202,11 +201,13 @@ class condGANTrainer(object):
                                            , weight_decay=config.weight_decay)
         lr_schedulerI = torch.optim.lr_scheduler.StepLR(optimizerI
                                                             , config.lr_drop)
-#         if os.path.exists(img_encoder_path):
-#             state_dict = \
-#                 torch.load(img_encoder_path, map_location=lambda storage, loc: storage)
-#             optimizerI.load_state_dict(state_dict['optimizer'])
-#             lr_schedulerI.load_state_dict(state_dict['lr_scheduler'])
+        
+        if os.path.exists(img_encoder_path):
+            print('Load image encoder optimizer from:', img_encoder_path)
+            state_dict = \
+                torch.load(img_encoder_path, map_location='cpu')
+            optimizerI.load_state_dict(state_dict['optimizer'])
+            lr_schedulerI.load_state_dict(state_dict['lr_scheduler'])
         #################################
         text_encoder_path = cfg.TRAIN.NET_E
         optimizerT = torch.optim.Adam(text_encoder.parameters()
@@ -214,26 +215,42 @@ class condGANTrainer(object):
                                            , weight_decay=config.weight_decay)
         lr_schedulerT = torch.optim.lr_scheduler.StepLR(optimizerT
                                                             , config.lr_drop)
-#         if os.path.exists(text_encoder_path):
-#             state_dict = \
-#                 torch.load(text_encoder_path, map_location=lambda storage, loc: storage)
-#             optimizerI.load_state_dict(state_dict['optimizer'])
-#             lr_schedulerI.load_state_dict(state_dict['lr_scheduler'])
+        
+        print('Load text encoder optimizer from:', cfg.TRAIN.NET_E)        
+        if os.path.exists(cfg.TRAIN.NET_E):
+            state_dict = torch.load(cfg.TRAIN.NET_E,map_location='cpu')
+            optimizerT.load_state_dict(state_dict['optimizer'])
+            lr_schedulerT.load_state_dict(state_dict['lr_scheduler'])
         
             
         
         ##################################################
         optimizersD = []
         num_Ds = len(netsD)
-        for i in range(num_Ds):
-            opt = optim.Adam(netsD[i].parameters(),
-                             lr=cfg.TRAIN.DISCRIMINATOR_LR,
-                             betas=(0.5, 0.999))
-            optimizersD.append(opt)
+        if cfg.TRAIN.B_NET_D:
+            Gname = cfg.TRAIN.NET_G
+            for i in range(num_Ds):
+                s_tmp = Gname[:Gname.rfind('/')]
+                Dname = '%s/netD%d.pth' % (s_tmp, i)
+                print('Load Optimizer D from: ', Dname)
+                state_dict = torch.load(Dname, map_location='cpu')
+                opt = optim.Adam(netsD[i].parameters(),
+                                 lr=cfg.TRAIN.DISCRIMINATOR_LR,
+                                 betas=(0.5, 0.999))
+                opt.load_state_dict(state_dict['optimizer'])
+                optimizersD.append(opt)
+            
+            
         ##################################################
         optimizerG = optim.Adam(netG.parameters(),
                                 lr=cfg.TRAIN.GENERATOR_LR,
                                 betas=(0.5, 0.999))
+        if os.path.exists(cfg.TRAIN.NET_G):
+            print('Load Generator optimizer from:',cfg.TRAIN.NET_G)
+            state_dict = \
+                torch.load(cfg.TRAIN.NET_G, map_location='cpu')
+            optimizerG.load_state_dict(state_dict['optimizer'])
+#             lr_schedulerC.load_state_dict(state_dict['lr_scheduler'])
         # ################## CAPTION model here ################# #
         param_dicts = [
             {"params": [p for n, p in cap_model.named_parameters(
@@ -251,11 +268,9 @@ class condGANTrainer(object):
                                                         , config.lr_drop)
         cap_model_path = cfg.TRAIN.NET_E.replace('text_encoder', 'cap_model')
         if os.path.exists(cap_model_path):
-            print('Loading optimzerC from checkpoints ...')
+            print('Load text encoder optimizer from:',cap_model_path)
             state_dict = \
-                torch.load(cap_model_path
-                           , map_location=lambda storage
-                           , loc: storage)
+                torch.load(cap_model_path, map_location='cpu')
             optimizerC.load_state_dict(state_dict['optimizer'])
             lr_schedulerC.load_state_dict(state_dict['lr_scheduler'])
 
@@ -437,7 +452,7 @@ class condGANTrainer(object):
         cap_criterion.train()
         #################################################
         
-        
+        tensorboard_step = 0
         gen_iterations = 0
         # gen_iterations = start_epoch * self.num_batches
         for epoch in range(start_epoch, self.max_epoch):
@@ -459,25 +474,32 @@ class condGANTrainer(object):
             fi_w_total_loss1 = 0 
             fi_s_total_loss0 = 0 
             fi_s_total_loss1 = 0
+            fi_total_damsm_loss = 0
+            
             
             ft_w_total_loss0 = 0 
             ft_w_total_loss1 = 0 
             ft_s_total_loss0 = 0 
             ft_s_total_loss1 = 0
+            ft_total_damsm_loss = 0
             
             s_total_loss0 = 0
             s_total_loss1 = 0
             w_total_loss0 = 0
             w_total_loss1 = 0
+            total_damsm_loss = 0
             
             c_total_loss = 0
+            
+            total_multimodal_loss = 0
             #########################################
             
             start_t = time.time()
 
             data_iter = iter(self.data_loader)
 #             step = 0
-            for step in tqdm(range(self.num_batches)): 
+            pbar = tqdm(range(self.num_batches))
+            for step in pbar: 
 #             while step < self.num_batches:
 #                 print('step:{:6d}|{:3d}'.format(step,self.num_batches), end='\r')
                 # reset requires_grad to be trainable for all Ds
@@ -506,15 +528,16 @@ class condGANTrainer(object):
                 
                 #### damsm losses
                 w_loss0, w_loss1, attn_maps = words_loss(words_features, words_embs, labels, cap_lens, class_ids, batch_size)
-                w_total_loss0 += w_loss0.data
-                w_total_loss1 += w_loss1.data
+                w_total_loss0 += w_loss0.item()
+                w_total_loss1 += w_loss1.item()
                 damsm_loss = w_loss0 + w_loss1
                 
                 s_loss0, s_loss1 = sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
-                s_total_loss0 += s_loss0.data
-                s_total_loss1 += s_loss1.data
+                s_total_loss0 += s_loss0.item()
+                s_total_loss1 += s_loss1.item()
                 damsm_loss += s_loss0 + s_loss1
                 
+                total_damsm_loss += damsm_loss.item()
                 ######################################################################################
                 
 #                 damsm_loss.backward() # do not backward because we will add all
@@ -530,7 +553,7 @@ class condGANTrainer(object):
              
                 cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
                 cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
-                c_total_loss += cap_loss.data
+                c_total_loss += cap_loss.item()
 #                 cap_loss.backward() # caption loss graph cleared, 
                 # grad accumulated -> cap_model -> image_encoder 
                 
@@ -575,7 +598,7 @@ class condGANTrainer(object):
                     errD.backward()
                     optimizersD[i].step()
                     errD_total += errD
-                    D_logs += 'errD%d: %.2f ' % (i, errD.data)
+                    D_logs += 'errD%d: %.2f ' % (i, errD.item())
 
                 #######################################################
                 # (4) Update G network: maximize log(D(G(z)))
@@ -592,7 +615,7 @@ class condGANTrainer(object):
                                    words_embs, sent_emb, match_labels, cap_lens, class_ids)
                 kl_loss = KL_loss(mu, logvar)
                 errG_total += kl_loss
-                G_logs += 'kl_loss: %.2f ' % kl_loss.data
+                G_logs += 'kl_loss: %.2f ' % kl_loss.item()
                 
 
                 ####### fake imge real text matching loss #################
@@ -603,18 +626,18 @@ class condGANTrainer(object):
                 fi_w_loss0, fi_w_loss1, fi_attn_maps = words_loss(fi_word_features, words_embs, labels,
                                                  cap_lens, class_ids, batch_size)
         
-                fi_w_total_loss0 += fi_w_loss0.data
-                fi_w_total_loss1 += fi_w_loss1.data
+                fi_w_total_loss0 += fi_w_loss0.item()
+                fi_w_total_loss1 += fi_w_loss1.item()
                 
                 fi_damsm_loss = fi_w_loss0 + fi_w_loss1
                 
                 fi_s_loss0, fi_s_loss1 = sent_loss(fi_sent_code, sent_emb, labels, class_ids, batch_size)
                 
-                fi_s_total_loss0 += fi_s_loss0.data
-                fi_s_total_loss1 += fi_s_loss1.data
+                fi_s_total_loss0 += fi_s_loss0.item()
+                fi_s_total_loss1 += fi_s_loss1.item()
                 
                 fi_damsm_loss += fi_s_loss0 + fi_s_loss1
-                
+                fi_total_damsm_loss += fi_damsm_loss.item()
                 #######################################################################
 #                 fi_damsm_loss.backward()
                 
@@ -624,7 +647,7 @@ class condGANTrainer(object):
                 fake_captions = tokenizer.batch_decode(fake_preds.tolist(), skip_special_tokens=True) # list of strings
                 fake_outputs = retokenizer.batch_encode_plus(
                         fake_captions, max_length=64, padding='max_length', add_special_tokens=False,
-                        return_attention_mask=True, return_token_type_ids=False, truncation=True)
+                        return_attention_mask=True, return_token_type_ids=None, truncation=True)
                 fake_tokens = fake_outputs['input_ids']
 #                 fake_tkmask = fake_outputs['attention_mask']
                 f_tokens = np.zeros((len(fake_tokens), 15), dtype=np.int64)
@@ -657,18 +680,18 @@ class condGANTrainer(object):
                 ft_w_loss0, ft_w_loss1, ft_attn_maps = words_loss(words_features, ft_words_emb, labels,
                                                  f_cap_lens, class_ids, batch_size)
         
-                ft_w_total_loss0 += ft_w_loss0.data
-                ft_w_total_loss1 += ft_w_loss1.data
+                ft_w_total_loss0 += ft_w_loss0.item()
+                ft_w_total_loss1 += ft_w_loss1.item()
                 
                 ft_damsm_loss = ft_w_loss0 + ft_w_loss1
                 
                 ft_s_loss0, ft_s_loss1 = sent_loss(sent_code, ft_sent_emb, labels, class_ids, batch_size)
                 
-                ft_s_total_loss0 += ft_s_loss0.data
-                ft_s_total_loss1 += ft_s_loss1.data
+                ft_s_total_loss0 += ft_s_loss0.item()
+                ft_s_total_loss1 += ft_s_loss1.item()
                 
                 ft_damsm_loss += ft_s_loss0 + ft_s_loss1   
-                
+                ft_total_damsm_loss += ft_damsm_loss.item()
                 ############################################################################
         
 #                 ft_damsm_loss.backward()
@@ -680,7 +703,7 @@ class condGANTrainer(object):
                                     cfg.TRAIN.SMOOTH.LAMBDA_FT*ft_damsm_loss + \
                                     cfg.TRAIN.SMOOTH.LAMBDA_CAP*cap_loss + \
                                     cfg.TRAIN.SMOOTH.LAMBDA_GEN*errG_total
-                
+                total_multimodal_loss += multimodal_loss.item()
                 ############################################################################
                 
                 multimodal_loss.backward()
@@ -708,8 +731,45 @@ class condGANTrainer(object):
                 optimizerG.step()
                 for p, avg_p in zip(netG.parameters(), avg_param_G):
                     avg_p.mul_(0.999).add_(0.001, p.data)
+    
+                ##################### loss values for each step #########################################
+                tbw.add_scalar('Train_step/step_loss_D', float(errD_total.item()), step + epoch * self.num_batches)
+                tbw.add_scalar('Train_step/step_loss_G', float(errG_total.item()), step + epoch * self.num_batches)
 
-                    
+                ## damsm ##
+#                 tbw.add_scalar('Train_step/train_w_step_loss0', float(w_loss0.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_s_step_loss0', float(s_loss0.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_w_step_loss1', float(w_loss1.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_s_step_loss1', float(s_loss1.item())/(step+1), step + epoch * self.num_batches)
+                tbw.add_scalar('Train_step/train_damsm_step_loss', float(damsm_loss.item())/(step+1), step + epoch * self.num_batches)
+
+                ## damsm fi rt ##
+#                 tbw.add_scalar('Train_step/train_fi_w_step_loss0', float(fi_w_loss0.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_fi_s_step_loss0', float(fi_s_loss0.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_fi_w_step_loss1', float(fi_w_loss1.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_fi_s_step_loss1', float(fi_s_loss1.item())/(step+1), step + epoch * self.num_batches)
+                tbw.add_scalar('Train_step/train_fi_damsm_step_loss', float(fi_damsm_loss.item())/(step+1), step + epoch * self.num_batches)
+                
+                ## damsm ri ft ##
+#                 tbw.add_scalar('Train_step/train_ft_w_step_loss0', float(ft_w_loss0.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_ft_s_step_loss0', float(ft_s_loss0.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_ft_w_step_loss1', float(ft_w_loss1.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_ft_s_step_loss1', float(ft_s_loss1.item())/(step+1), step + epoch * self.num_batches)
+                tbw.add_scalar('Train_step/train_ft_damsm_step_loss', float(ft_damsm_loss.item())/(step+1), step + epoch * self.num_batches)
+
+                ## caption loss ###
+                tbw.add_scalar('Train_step/train_c_step_loss', float(cap_loss.item())/(step+1), step + epoch * self.num_batches)
+
+                ## multimodal loss ##
+                tbw.add_scalar('Train_step/train_multimodal_step_loss', float(multimodal_loss.item())/(step+1), step + epoch * self.num_batches)
+                ################################################################################################    
+                
+                ############ tqdm descriptions showing running average loss in terminal ##############################
+                pbar.set_description('multimodel %.5f, damsm %.5f, fi %.5f, ft %.5f, cap %.5f' 
+                                     % (float(total_multimodal_loss) / (step+1), float(total_damsm_loss) / (step+1), 
+                                        float(fi_total_damsm_loss) / (step+1), float(ft_total_damsm_loss) / (step+1), 
+                                        float(c_total_loss) / (step+1)))
+                ######################################################################################################
                 # 14 -- 2800 iterations=steps for 1 epoch    
 #                 if gen_iterations % 100 == 0:
 #                     print(D_logs + '\n' + G_logs)
@@ -722,48 +782,74 @@ class condGANTrainer(object):
                                           captions, cap_lens, epoch, name='average')
                     load_params(netG, backup_para)
                     netG.train() ### convert back to train, because in save_img_results we do netG.eval()
+                
                 ##########################################################
-#                 if step==2:
-#                     break
+                if step % 1000 == 0 and step != 0:
+                    
+                    ##################### Average values of each loss every 1000 steps ##########################
+                    tbw.add_scalar('Loss_D', float(errD_total), tensorboard_step)
+                    tbw.add_scalar('Loss_G', float(errG_total), tensorboard_step)
+
+                    ## damsm ##
+                    tbw.add_scalar('train_w_loss0', float(w_total_loss0)/(step+1), tensorboard_step)
+                    tbw.add_scalar('train_s_loss0', float(s_total_loss0)/(step+1), tensorboard_step)
+                    tbw.add_scalar('train_w_loss1', float(w_total_loss1)/(step+1), tensorboard_step)
+                    tbw.add_scalar('train_s_loss1', float(s_total_loss1)/(step+1), tensorboard_step)
+                    tbw.add_scalar('total_damsm_loss', float(total_damsm_loss)/(step+1), tensorboard_step)
+
+                    ## damsm fi rt ##
+                    tbw.add_scalar('train_fi_w_loss0', float(fi_w_total_loss0)/(step+1), tensorboard_step)
+                    tbw.add_scalar('train_fi_s_loss0', float(fi_s_total_loss0)/(step+1), tensorboard_step)
+                    tbw.add_scalar('train_fi_w_loss1', float(fi_w_total_loss1)/(step+1), tensorboard_step)
+                    tbw.add_scalar('train_fi_s_loss1', float(fi_s_total_loss1)/(step+1), tensorboard_step)
+                    tbw.add_scalar('fi_total_damsm_loss', float(fi_total_damsm_loss)/(step+1), tensorboard_step)
+
+                    ## damsm ri ft ##
+                    tbw.add_scalar('train_ft_w_loss0', float(ft_w_total_loss0)/(step+1), tensorboard_step)
+                    tbw.add_scalar('train_ft_s_loss0', float(ft_s_total_loss0)/(step+1), tensorboard_step)
+                    tbw.add_scalar('train_ft_w_loss1', float(ft_w_total_loss1)/(step+1), tensorboard_step)
+                    tbw.add_scalar('train_ft_s_loss1', float(ft_s_total_loss1)/(step+1), tensorboard_step)
+                    tbw.add_scalar('ft_total_damsm_loss', float(ft_total_damsm_loss)/(step+1), tensorboard_step)
+
+                    ## caption loss ###
+                    tbw.add_scalar('train_c_loss', float(c_total_loss)/(step+1), tensorboard_step)
+
+                    ## multimodal loss ##
+                    tbw.add_scalar('train_multimodal_loss', float(total_multimodal_loss)/(step+1), tensorboard_step)
+                    ################################################################################################
+                    
+                    #### validate ####
+                    v_s_cur_loss, v_w_cur_loss, v_c_cur_loss = self.evaluate(self.dataloader_val, image_encoder, text_encoder, cap_model, self.val_batch_size)
+                    ### val losses ###
+                    tbw.add_scalar('val_w_loss', float(v_w_cur_loss), tensorboard_step)
+                    tbw.add_scalar('val_s_loss', float(v_s_cur_loss), tensorboard_step)
+                    tbw.add_scalar('val_c_loss', float(v_c_cur_loss), tensorboard_step)
+                    
+                    ### back to train ###
+                    text_encoder.train()
+                    image_encoder.train()
+                    netG.train()
+                    cap_model.train()
+                    for k,v in image_encoder.named_children():
+                        if k in frozen_list_image_encoder:
+                            v.train(False)
+                    for i in range(len(netsD)):
+                        netsD[i].train()
+                    
+                    tensorboard_step+=1
+                    
+                    #### save model update the files every 1000 iters within epoch 
+                    self.save_model(netG, avg_param_G, image_encoder, text_encoder, netsD, epoch, cap_model, optimizerC, optimizerI, optimizerT, lr_schedulerC, lr_schedulerI, lr_schedulerT, optimizerG, optimizersD)
                 
                 
+#             print('step:',step)
             lr_schedulerC.step()
             lr_schedulerI.step()
             lr_schedulerT.step()
             
             end_t = time.time()
             
-            tbw.add_scalar('Loss_D', float(errD_total.item()), epoch)
-            tbw.add_scalar('Loss_G', float(errG_total.item()), epoch)
             
-            ## damsm ##
-            tbw.add_scalar('train_w_loss0', float(w_total_loss0.item()), epoch)
-            tbw.add_scalar('train_s_loss0', float(s_total_loss0.item()), epoch)
-            tbw.add_scalar('train_w_loss1', float(w_total_loss1.item()), epoch)
-            tbw.add_scalar('train_s_loss1', float(s_total_loss1.item()), epoch)
-            
-            ## damsm fi rt ##
-            
-
-
-
-            tbw.add_scalar('train_fi_w_loss0', float(fi_w_total_loss0.item()), epoch)
-            tbw.add_scalar('train_fi_s_loss0', float(fi_s_total_loss0.item()), epoch)
-            tbw.add_scalar('train_fi_w_loss1', float(fi_w_total_loss1.item()), epoch)
-            tbw.add_scalar('train_fi_s_loss1', float(fi_s_total_loss1.item()), epoch)
-            
-            ## damsm ri ft ##
-            tbw.add_scalar('train_ft_w_loss0', float(ft_w_total_loss0.item()), epoch)
-            tbw.add_scalar('train_ft_s_loss0', float(ft_s_total_loss0.item()), epoch)
-            tbw.add_scalar('train_ft_w_loss1', float(ft_w_total_loss1.item()), epoch)
-            tbw.add_scalar('train_ft_s_loss1', float(ft_s_total_loss1.item()), epoch)
-            
-            
-            ## caption loss ###
-            tbw.add_scalar('train_c_loss', float(c_total_loss.item()), epoch)
-            
-            ## multimodal loss ##
-            tbw.add_scalar('train_multimodal_loss', float(multimodal_loss.item()), epoch)
             
 #             print('''[%d/%d][%d]
 #                   Loss_D: %.2f Loss_G: %.2f Time: %.2fs'''
@@ -776,11 +862,7 @@ class condGANTrainer(object):
                 self.save_model(netG, avg_param_G, image_encoder, text_encoder, netsD, epoch, cap_model, optimizerC, optimizerI, optimizerT, lr_schedulerC, lr_schedulerI, lr_schedulerT, optimizerG, optimizersD)
                 
                 
-            v_s_cur_loss, v_w_cur_loss, v_c_cur_loss = self.evaluate(self.dataloader_val, image_encoder, text_encoder, cap_model, self.val_batch_size)
-
-            tbw.add_scalar('val_w_loss', float(v_w_cur_loss), epoch)
-            tbw.add_scalar('val_s_loss', float(v_s_cur_loss), epoch)
-            tbw.add_scalar('val_c_loss', float(v_c_cur_loss), epoch)
+            
 
 
 #             print('v_s_cur_loss:{:.5f}, v_w_cur_loss:{:.5f}, v_c_cur_loss:{:.5f}'.format(v_s_cur_loss, v_w_cur_loss, v_c_cur_loss))
