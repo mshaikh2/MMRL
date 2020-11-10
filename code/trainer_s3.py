@@ -49,6 +49,59 @@ tokenizer = BertTokenizer.from_pretrained(config.vocab, do_lower=True)
 retokenizer = BertTokenizer.from_pretrained("catr/damsm_vocab.txt", do_lower=True)
 # reg_tokenizer = RegexpTokenizer(r'\w+')
 frozen_list_image_encoder = ['Conv2d_1a_3x3','Conv2d_2a_3x3','Conv2d_2b_3x3','Conv2d_3b_1x1','Conv2d_4a_3x3']
+
+@torch.no_grad()
+def evaluate(cnn_model, trx_model, cap_model, batch_size, cap_criterion, dataloader_val):
+    cnn_model.eval()
+    trx_model.eval()
+    cap_model.eval() ### 
+    s_total_loss = 0
+    w_total_loss = 0
+    c_total_loss = 0 ###
+    ### add caption criterion here. #####
+#     cap_criterion = torch.nn.CrossEntropyLoss() # add caption criterion here
+    labels = torch.LongTensor(range(batch_size)) # used for matching loss
+    if cfg.CUDA:
+        labels = labels.cuda()
+#         cap_criterion = cap_criterion.cuda() # add caption criterion here
+#     cap_criterion.eval()
+    #####################################
+
+    val_data_iter = iter(dataloader_val)
+    for step in tqdm(range(len(val_data_iter)),leave=False):
+        data = val_data_iter.next()
+
+        real_imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
+
+        words_features, sent_code = cnn_model(cap_imgs)
+
+        words_emb, sent_emb = trx_model(captions)
+
+        ##### add catr here #####
+        cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
+
+        cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
+
+        c_total_loss += cap_loss.item()
+        #########################
+
+        w_loss0, w_loss1, attn = words_loss(words_features, words_emb, labels,
+                                            cap_lens, class_ids, batch_size)
+        w_total_loss += (w_loss0 + w_loss1).item()
+
+        s_loss0, s_loss1 = \
+            sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
+        s_total_loss += (s_loss0 + s_loss1).item()
+
+#             if step == 50:
+#                 break
+
+    s_cur_loss = s_total_loss / step
+    w_cur_loss = w_total_loss / step
+    c_cur_loss = c_total_loss / step
+
+    return s_cur_loss, w_cur_loss, c_cur_loss
+
             
 # ################# Text to image task############################ #
 class condGANTrainer(object):
@@ -395,8 +448,8 @@ class condGANTrainer(object):
         
         now = datetime.datetime.now(dateutil.tz.tzlocal())
         timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
-
-        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3', timestamp)
+        #     LAMBDA_FT,LAMBDA_FI,LAMBDA_DAMSM=01,50,10
+        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-000001', timestamp)
         mkdir_p(tb_dir)
         tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
 
@@ -448,8 +501,8 @@ class condGANTrainer(object):
         if cfg.CUDA:
             labels = labels.cuda()
             noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
-            cap_criterion = cap_criterion.cuda() # add caption criterion here
-        cap_criterion.train()
+#             cap_criterion = cap_criterion.cuda() # add caption criterion here
+#         cap_criterion.train()
         #################################################
         
         tensorboard_step = 0
@@ -737,35 +790,35 @@ class condGANTrainer(object):
                 tbw.add_scalar('Train_step/step_loss_G', float(errG_total.item()), step + epoch * self.num_batches)
 
                 ## damsm ##
-#                 tbw.add_scalar('Train_step/train_w_step_loss0', float(w_loss0.item())/(step+1), step + epoch * self.num_batches)
-#                 tbw.add_scalar('Train_step/train_s_step_loss0', float(s_loss0.item())/(step+1), step + epoch * self.num_batches)
-#                 tbw.add_scalar('Train_step/train_w_step_loss1', float(w_loss1.item())/(step+1), step + epoch * self.num_batches)
-#                 tbw.add_scalar('Train_step/train_s_step_loss1', float(s_loss1.item())/(step+1), step + epoch * self.num_batches)
-                tbw.add_scalar('Train_step/train_damsm_step_loss', float(damsm_loss.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_w_step_loss0', float(w_loss0.item()), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_s_step_loss0', float(s_loss0.item()), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_w_step_loss1', float(w_loss1.item()), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_s_step_loss1', float(s_loss1.item()), step + epoch * self.num_batches)
+                tbw.add_scalar('Train_step/train_damsm_step_loss', float(damsm_loss.item()), step + epoch * self.num_batches)
 
                 ## damsm fi rt ##
-#                 tbw.add_scalar('Train_step/train_fi_w_step_loss0', float(fi_w_loss0.item())/(step+1), step + epoch * self.num_batches)
-#                 tbw.add_scalar('Train_step/train_fi_s_step_loss0', float(fi_s_loss0.item())/(step+1), step + epoch * self.num_batches)
-#                 tbw.add_scalar('Train_step/train_fi_w_step_loss1', float(fi_w_loss1.item())/(step+1), step + epoch * self.num_batches)
-#                 tbw.add_scalar('Train_step/train_fi_s_step_loss1', float(fi_s_loss1.item())/(step+1), step + epoch * self.num_batches)
-                tbw.add_scalar('Train_step/train_fi_damsm_step_loss', float(fi_damsm_loss.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_fi_w_step_loss0', float(fi_w_loss0.item()), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_fi_s_step_loss0', float(fi_s_loss0.item()), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_fi_w_step_loss1', float(fi_w_loss1.item()), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_fi_s_step_loss1', float(fi_s_loss1.item()), step + epoch * self.num_batches)
+                tbw.add_scalar('Train_step/train_fi_damsm_step_loss', float(fi_damsm_loss.item()), step + epoch * self.num_batches)
                 
                 ## damsm ri ft ##
-#                 tbw.add_scalar('Train_step/train_ft_w_step_loss0', float(ft_w_loss0.item())/(step+1), step + epoch * self.num_batches)
-#                 tbw.add_scalar('Train_step/train_ft_s_step_loss0', float(ft_s_loss0.item())/(step+1), step + epoch * self.num_batches)
-#                 tbw.add_scalar('Train_step/train_ft_w_step_loss1', float(ft_w_loss1.item())/(step+1), step + epoch * self.num_batches)
-#                 tbw.add_scalar('Train_step/train_ft_s_step_loss1', float(ft_s_loss1.item())/(step+1), step + epoch * self.num_batches)
-                tbw.add_scalar('Train_step/train_ft_damsm_step_loss', float(ft_damsm_loss.item())/(step+1), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_ft_w_step_loss0', float(ft_w_loss0.item()), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_ft_s_step_loss0', float(ft_s_loss0.item()), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_ft_w_step_loss1', float(ft_w_loss1.item()), step + epoch * self.num_batches)
+#                 tbw.add_scalar('Train_step/train_ft_s_step_loss1', float(ft_s_loss1.item()), step + epoch * self.num_batches)
+                tbw.add_scalar('Train_step/train_ft_damsm_step_loss', float(ft_damsm_loss.item()), step + epoch * self.num_batches)
 
                 ## caption loss ###
-                tbw.add_scalar('Train_step/train_c_step_loss', float(cap_loss.item())/(step+1), step + epoch * self.num_batches)
+                tbw.add_scalar('Train_step/train_c_step_loss', float(cap_loss.item()), step + epoch * self.num_batches)
 
                 ## multimodal loss ##
-                tbw.add_scalar('Train_step/train_multimodal_step_loss', float(multimodal_loss.item())/(step+1), step + epoch * self.num_batches)
+                tbw.add_scalar('Train_step/train_multimodal_step_loss', float(multimodal_loss.item()), step + epoch * self.num_batches)
                 ################################################################################################    
                 
                 ############ tqdm descriptions showing running average loss in terminal ##############################
-                pbar.set_description('multimodel %.5f, damsm %.5f, fi %.5f, ft %.5f, cap %.5f' 
+                pbar.set_description('multimodal %.5f, damsm %.5f, fi %.5f, ft %.5f, cap %.5f' 
                                      % (float(total_multimodal_loss) / (step+1), float(total_damsm_loss) / (step+1), 
                                         float(fi_total_damsm_loss) / (step+1), float(ft_total_damsm_loss) / (step+1), 
                                         float(c_total_loss) / (step+1)))
@@ -816,26 +869,28 @@ class condGANTrainer(object):
 
                     ## multimodal loss ##
                     tbw.add_scalar('train_multimodal_loss', float(total_multimodal_loss)/(step+1), tensorboard_step)
-                    ################################################################################################
                     
                     #### validate ####
-                    v_s_cur_loss, v_w_cur_loss, v_c_cur_loss = self.evaluate(self.dataloader_val, image_encoder, text_encoder, cap_model, self.val_batch_size)
-                    ### val losses ###
-                    tbw.add_scalar('val_w_loss', float(v_w_cur_loss), tensorboard_step)
-                    tbw.add_scalar('val_s_loss', float(v_s_cur_loss), tensorboard_step)
-                    tbw.add_scalar('val_c_loss', float(v_c_cur_loss), tensorboard_step)
-                    
+                    v_s_cur_loss, v_w_cur_loss, v_c_cur_loss = evaluate(image_encoder, text_encoder, 
+                                                                        cap_model, self.val_batch_size, 
+                                                                        cap_criterion, self.dataloader_val)
                     ### back to train ###
                     text_encoder.train()
                     image_encoder.train()
-                    netG.train()
-                    cap_model.train()
                     for k,v in image_encoder.named_children():
                         if k in frozen_list_image_encoder:
                             v.train(False)
+                    netG.train()
+                    cap_model.train()
                     for i in range(len(netsD)):
                         netsD[i].train()
-                    
+
+                    ### val losses ###
+                    tbw.add_scalar('Val_step/val_w_loss', float(v_w_cur_loss), tensorboard_step)
+                    tbw.add_scalar('Val_step/val_s_loss', float(v_s_cur_loss), tensorboard_step)
+                    tbw.add_scalar('Val_step/val_c_loss', float(v_c_cur_loss), tensorboard_step)
+
+
                     tensorboard_step+=1
                     
                     #### save model update the files every 1000 iters within epoch 
@@ -850,6 +905,8 @@ class condGANTrainer(object):
             end_t = time.time()
             
             
+            ################################################################################################
+
             
 #             print('''[%d/%d][%d]
 #                   Loss_D: %.2f Loss_G: %.2f Time: %.2fs'''
@@ -870,57 +927,57 @@ class condGANTrainer(object):
 
         self.save_model(netG, avg_param_G, image_encoder, text_encoder, netsD, self.max_epoch, cap_model, optimizerC, optimizerI, optimizerT, lr_schedulerC, lr_schedulerI, lr_schedulerT, optimizerG, optimizersD)
 
-    @torch.no_grad()
-    def evaluate(self, dataloader, cnn_model, trx_model, cap_model, batch_size):
-        cnn_model.eval()
-        trx_model.eval()
-        cap_model.eval() ### 
-        s_total_loss = 0
-        w_total_loss = 0
-        c_total_loss = 0 ###
-        ### add caption criterion here. #####
-        cap_criterion = torch.nn.CrossEntropyLoss() # add caption criterion here
-        labels = Variable(torch.LongTensor(range(batch_size))) # used for matching loss
-        if cfg.CUDA:
-            labels = labels.cuda()
-            cap_criterion = cap_criterion.cuda() # add caption criterion here
-        cap_criterion.eval()
-        #####################################
+#     @torch.no_grad()
+#     def evaluate(self, cnn_model, trx_model, cap_model, batch_size):
+#         cnn_model.eval()
+#         trx_model.eval()
+#         cap_model.eval() ### 
+#         s_total_loss = 0
+#         w_total_loss = 0
+#         c_total_loss = 0 ###
+#         ### add caption criterion here. #####
+#         cap_criterion = torch.nn.CrossEntropyLoss() # add caption criterion here
+#         labels = Variable(torch.LongTensor(range(batch_size))) # used for matching loss
+#         if cfg.CUDA:
+#             labels = labels.cuda()
+#             cap_criterion = cap_criterion.cuda() # add caption criterion here
+#         cap_criterion.eval()
+#         #####################################
         
-        val_data_iter = iter(self.dataloader_val)
-        for step in tqdm(range(len(val_data_iter)),leave=False):
-            data = val_data_iter.next()
+#         val_data_iter = iter(self.dataloader_val)
+#         for step in tqdm(range(len(val_data_iter)),leave=False):
+#             data = val_data_iter.next()
             
-            real_imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
+#             real_imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
             
-            words_features, sent_code = cnn_model(cap_imgs)
+#             words_features, sent_code = cnn_model(cap_imgs)
 
-            words_emb, sent_emb = trx_model(captions)
+#             words_emb, sent_emb = trx_model(captions)
             
-            ##### add catr here #####
-            cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
+#             ##### add catr here #####
+#             cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
 
-            cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
+#             cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
 
-            c_total_loss += cap_loss.data
-            #########################
+#             c_total_loss += cap_loss.data
+#             #########################
 
-            w_loss0, w_loss1, attn = words_loss(words_features, words_emb, labels,
-                                                cap_lens, class_ids, batch_size)
-            w_total_loss += (w_loss0 + w_loss1).data
+#             w_loss0, w_loss1, attn = words_loss(words_features, words_emb, labels,
+#                                                 cap_lens, class_ids, batch_size)
+#             w_total_loss += (w_loss0 + w_loss1).data
 
-            s_loss0, s_loss1 = \
-                sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
-            s_total_loss += (s_loss0 + s_loss1).data
+#             s_loss0, s_loss1 = \
+#                 sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
+#             s_total_loss += (s_loss0 + s_loss1).data
 
-#             if step == 50:
-#                 break
+# #             if step == 50:
+# #                 break
 
-        s_cur_loss = s_total_loss / step
-        w_cur_loss = w_total_loss / step
-        c_cur_loss = c_total_loss / step
+#         s_cur_loss = s_total_loss / step
+#         w_cur_loss = w_total_loss / step
+#         c_cur_loss = c_total_loss / step
 
-        return s_cur_loss, w_cur_loss, c_cur_loss
+#         return s_cur_loss, w_cur_loss, c_cur_loss
         
         
     def save_singleimages(self, images, filenames, save_dir,

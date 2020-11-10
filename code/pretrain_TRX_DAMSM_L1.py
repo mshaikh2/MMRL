@@ -11,7 +11,7 @@ from datasets import prepare_data
 from model import TEXT_TRANSFORMER_ENCODERv2, CNN_ENCODER
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 import sys
 import time
 import random
@@ -40,11 +40,12 @@ UPDATE_INTERVAL = 900
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a DAMSM network')
-    parser.add_argument('--cfg', dest='cfg_file',
-                        help='optional config file',
-                        default='../code/cfg/DAMSM/coco.yml', type=str)
-    parser.add_argument('--gpu', dest='gpu_id', type=int, default=0)
-    parser.add_argument('--data_dir', dest='data_dir', type=str, default='../data/coco/')
+    parser.add_argument('--cfg', dest='cfg_file'
+                        , help='optional config file'
+                        , default='cfg/DAMSM/bird.yml'
+                        , type=str)
+    parser.add_argument('--gpu', dest='gpu_id', type=int, default=2)
+    parser.add_argument('--data_dir', dest='data_dir', type=str, default='../data/birds/')
     parser.add_argument('--manualSeed', type=int, help='manual seed')
     args = parser.parse_args()
     return args
@@ -68,9 +69,7 @@ def train(dataloader, cnn_model, trx_model, batch_size,
         print('step:{:6d}|{:3d}'.format(step,len(dataloader)), end='\r')
         trx_model.zero_grad()
         cnn_model.zero_grad()
-
-        imgs, captions, cap_lens, \
-            class_ids, keys = prepare_data(data)
+        imgs, captions, cap_lens, class_ids, keys, _, _, _, _ = prepare_data(data)
 
         # words_features: batch_size x nef x 17 x 17
         # sent_code: batch_size x nef
@@ -145,10 +144,10 @@ def train(dataloader, cnn_model, trx_model, batch_size,
                           elapsed * 1000. / UPDATE_INTERVAL,
                           s_cur_loss0, s_cur_loss1,
                           w_cur_loss0, w_cur_loss1))
-            tbw.add_scalar('train_w_loss0', float(w_cur_loss0.item()), epoch)
-            tbw.add_scalar('train_s_loss0', float(s_cur_loss0.item()), epoch)
-            tbw.add_scalar('train_w_loss1', float(w_cur_loss1.item()), epoch)
-            tbw.add_scalar('train_s_loss1', float(s_cur_loss1.item()), epoch)
+            tbw.add_scalar('Birds_Train/train_w_loss0', float(w_cur_loss0.item()), epoch)
+            tbw.add_scalar('Birds_Train/train_s_loss0', float(s_cur_loss0.item()), epoch)
+            tbw.add_scalar('Birds_Train/train_w_loss1', float(w_cur_loss1.item()), epoch)
+            tbw.add_scalar('Birds_Train/train_s_loss1', float(s_cur_loss1.item()), epoch)
             s_total_loss0 = 0
             s_total_loss1 = 0
             w_total_loss0 = 0
@@ -172,8 +171,7 @@ def evaluate(dataloader, cnn_model, trx_model, batch_size):
     s_total_loss = 0
     w_total_loss = 0
     for step, data in enumerate(dataloader, 0):
-        real_imgs, captions, cap_lens, \
-                class_ids, keys = prepare_data(data)
+        real_imgs, captions, cap_lens, class_ids, keys, _, _, _, _ = prepare_data(data)
 
         words_features, sent_code = cnn_model(real_imgs[-1])
         # nef = words_features.size(1)
@@ -214,29 +212,29 @@ def build_models():
     start_epoch = 0
     if cfg.TRAIN.NET_E != '':
         print('Loading... ', cfg.TRAIN.NET_E)
-        state_dict = torch.load(cfg.TRAIN.NET_E)
+        state_dict = torch.load(cfg.TRAIN.NET_E,map_location='cpu')
         
         
-        new_state_dict = {}
-        for k,v in state_dict.items():
-            new_state_dict[k.replace('module.','')]=v
-        new_state_dict
-        text_encoder.load_state_dict(new_state_dict)
+#         new_state_dict = {}
+#         for k,v in state_dict.items():
+#             new_state_dict[k.replace('module.','')]=v
+#         new_state_dict
+        text_encoder.load_state_dict(state_dict['model'])
         
         
 #         text_encoder.load_state_dict(state_dict)
         print('Load ', cfg.TRAIN.NET_E)
         #
         name = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
-        state_dict = torch.load(name)
+        state_dict = torch.load(name,map_location='cpu')
         
-        new_state_dict = {}
-        for k,v in state_dict.items():
-            new_state_dict[k.replace('module.','')]=v
-        new_state_dict
+#         new_state_dict = {}
+#         for k,v in state_dict.items():
+#             new_state_dict[k.replace('module.','')]=v
+#         new_state_dict
         
         
-        image_encoder.load_state_dict(new_state_dict)
+        image_encoder.load_state_dict(state_dict['model'])
         print('Load ', name)
 
         istart = cfg.TRAIN.NET_E.rfind('_') + 8
@@ -266,7 +264,7 @@ if __name__ == "__main__":
         cfg.CUDA = False
     else:
         cfg.GPU_ID = args.gpu_id
-
+    print('cfg.GPU_ID:',cfg.GPU_ID)
     if args.data_dir != '':
         cfg.DATA_DIR = args.data_dir
     print('Using config:')
@@ -297,7 +295,7 @@ if __name__ == "__main__":
     mkdir_p(image_dir)
     mkdir_p(metrics_dir)
 
-#     torch.cuda.set_device(cfg.GPU_ID)
+    torch.cuda.set_device(cfg.GPU_ID)
     cudnn.benchmark = True
 
     tb_dir = '../tensorboard/{0}_L{1}_TRX_{2}_{3}_{4}'.format(isTrainable,layers,cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
@@ -334,12 +332,13 @@ if __name__ == "__main__":
     
     
     # Initialize the embeddings with pretrained BERT embeddings ##########
-    df = pd.read_pickle('../data/coco/bert_word_embedding.pickle')
-    embedding_matrix = df.values
-#     embedding_matrix.shape
+    embedding_matrix = pd.read_pickle(os.path.join(cfg.DATA_DIR,'bert_word_embedding.pickle'))
+#     embedding_matrix = df.values
+    print('embedding_matrix.shape:',embedding_matrix.shape)
     embedding_matrix_ = torch.FloatTensor(embedding_matrix)
     embedding_matrix_ = embedding_matrix_.cuda()
 #     embedding_matrix_
+    cfg.TEXT.WORDS_NUM = 15
     pos_encoding = PE.positional_encoding(cfg.TEXT.WORDS_NUM, dimensions=cfg.TEXT.EMBEDDING_DIM)
     pos_encoding = np.squeeze(pos_encoding,axis=0)
     pos_encoding_ = torch.FloatTensor(pos_encoding)
@@ -359,13 +358,15 @@ if __name__ == "__main__":
         if v.requires_grad:
             para.append(v)
         else:
-            print(k)
+#             print(k)
+            pass
     print('\n\n Text Encoder parameters that do not require grad are:')
     for k,v in text_encoder.named_parameters():
         if v.requires_grad:
             para.append(v)
         else:
-            print(k)
+#             print(k)
+            pass
 #     text_encoder = torch.nn.DataParallel(text_encoder, device_ids=[0,1])
 #     image_encoder = torch.nn.DataParallel(image_encoder, device_ids=[0,1])
     # optimizer = optim.Adam(para, lr=cfg.TRAIN.ENCODER_LR, betas=(0.5, 0.999))
@@ -388,19 +389,27 @@ if __name__ == "__main__":
                 print('| end epoch {:3d} | valid loss '
                       '{:5.2f} {:5.2f} | lr {:.5f}|'
                       .format(epoch, s_loss, w_loss, lr))
-                tbw.add_scalar('val_w_loss', float(w_loss.item()), epoch)
-                tbw.add_scalar('val_s_loss', float(s_loss.item()), epoch)
+                tbw.add_scalar('Birds_Val/val_w_loss', float(w_loss.item()), epoch)
+                tbw.add_scalar('Birds_Val/val_s_loss', float(s_loss.item()), epoch)
             print('-' * 89)
-            if lr > cfg.TRAIN.ENCODER_LR/10.:
+            if lr > 0.00005: #cfg.TRAIN.ENCODER_LR/10.:
                 lr *= 0.98
 
             if (epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0 or
                 epoch == cfg.TRAIN.MAX_EPOCH):
-                torch.save(image_encoder.state_dict(),
-                           '{0}/image_encoder{1}.pth'.format(model_dir, epoch))
-                torch.save(text_encoder.state_dict(),
-                           '{0}/text_encoder{1}.pth'.format(model_dir, epoch))
-                print('Save G/Ds models.')
+                torch.save({
+                    'model': image_encoder.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+#                     'lr_scheduler': lr_schedulerI.state_dict(),
+                }, '{0}/image_encoder{1}.pth'.format(model_dir, epoch))
+                
+                torch.save({
+                    'model': text_encoder.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+#                     'lr_scheduler': lr_schedulerT.state_dict(),
+                }, '{0}/text_encoder{1}.pth'.format(model_dir, epoch))
+                
+#                 print('Save G/Ds models.')
         
     except KeyboardInterrupt:
         print('-' * 89)

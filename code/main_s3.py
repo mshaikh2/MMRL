@@ -24,7 +24,8 @@ import pickle
 dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
 sys.path.append(dir_path)
 
-from catr.cfg_damsm_bert import Config ## add catr config file here
+from catr.cfg_damsm_bert import Config ## ONLY used for COCO2014
+# from catr.cfg_damsm_cub import Config ## ONLY used for CUB
 config  = Config()
 
 
@@ -125,8 +126,9 @@ if __name__ == "__main__":
     
     now = datetime.datetime.now(dateutil.tz.tzlocal())
     timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
+#     LAMBDA_FT,LAMBDA_FI,LAMBDA_DAMSM=01,50,10
     output_dir = '../output/%s_%s_%s' % \
-        (cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3', timestamp)
+        (cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-000001', timestamp)
 
     split_dir, bshuffle = 'train', True
     if not cfg.TRAIN.FLAG:
@@ -152,13 +154,13 @@ if __name__ == "__main__":
     dataset_val = TextDataset(cfg.DATA_DIR, 'test',
                               base_size=cfg.TREE.BASE_SIZE,
                               transform=image_transform)
-    val_batch_size = 32
+    val_batch_size = 24
     dataloader_val = torch.utils.data.DataLoader(
         dataset_val, batch_size=val_batch_size, drop_last=True,
-        shuffle=True, num_workers=int(cfg.WORKERS))
+        shuffle=True, num_workers=int(cfg.WORKERS / 2))
     
     # Define models and go to train/evaluate
-    algo = trainer(output_dir, dataloader,dataloader_val, dataset.n_words, dataset.ixtoword)
+    algo = trainer(output_dir, dataloader, dataloader_val, dataset.n_words, dataset.ixtoword)
 
     start_t = time.time()
     if cfg.TRAIN.FLAG:

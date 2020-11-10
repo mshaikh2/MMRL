@@ -70,6 +70,27 @@ val_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
+
+bird_train_transform = transforms.Compose([
+    RandomRotation(),
+#     transforms.Lambda(under_max),
+    transforms.ColorJitter(brightness=[0.85, 1.2], contrast=[
+                              0.9, 1.15], saturation=[0.85, 1.2]),
+    transforms.Resize(int(MAX_DIM)),
+    transforms.RandomCrop(MAX_DIM),
+#     transforms.RandomResizedCrop(MAX_DIM, scale=(1.4, 1.6), ratio=(0.97, 1.05)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+])
+
+bird_val_transform = transforms.Compose([
+#     transforms.Lambda(under_max),
+    transforms.Resize(int(MAX_DIM)),
+    transforms.CenterCrop(MAX_DIM),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
 #####################################################################
 
 def prepare_data(data):
@@ -104,6 +125,7 @@ def prepare_data(data):
         s_masks = Variable(s_masks).cuda() # add s_masks here
         captions = Variable(captions).cuda()
         sorted_cap_lens = Variable(sorted_cap_lens).cuda()
+        
     else:
         cap_imgs = Variable(cap_imgs) # add cap_imgs here
         cap_img_masks = Variable(cap_img_masks) # add cap_img_masks here
@@ -121,13 +143,6 @@ def get_imgs(img_path, imsize, bbox=None,
     try:
         img = Image.open(img_path).convert('RGB')
         
-        ######## add caption image transform code here #######
-        if cap_transform is not None:
-            cap_img = cap_transform(img)
-        cap_img = nested_tensor_from_tensor_list(cap_img.unsqueeze(0))
-#         print(cap_img.mask.shape)
-        ######################################################
-        
         width, height = img.size
         if bbox is not None:
             r = int(np.maximum(bbox[2], bbox[3]) * 0.75)
@@ -138,6 +153,13 @@ def get_imgs(img_path, imsize, bbox=None,
             x1 = np.maximum(0, center_x - r)
             x2 = np.minimum(width, center_x + r)
             img = img.crop([x1, y1, x2, y2])
+        
+        ######## add caption image transform code here #######
+        if cap_transform is not None:
+            cap_img = cap_transform(img)
+        cap_img = nested_tensor_from_tensor_list(cap_img.unsqueeze(0))
+#         print(cap_img.mask.shape)
+        ######################################################
 
         if transform is not None:
             img = transform(img)
@@ -180,8 +202,10 @@ class TextDataset(data.Dataset):
         self.data = []
         self.data_dir = data_dir
         if data_dir.find('birds') != -1:
+            self.cub_flag = True # Flag for CUB dataset
             self.bbox = self.load_bbox()
         else:
+            self.cub_flag = False
             self.bbox = None
         split_dir = os.path.join(data_dir, split)
 
@@ -191,13 +215,21 @@ class TextDataset(data.Dataset):
         self.class_id = self.load_class_id(split_dir, len(self.filenames))
         self.number_example = len(self.filenames)
         ############## add addtional domain here for catr ####################
+        if self.cub_flag:
+            vocab = "catr/bird_vocab.txt"
         self.tokenizer = BertTokenizer.from_pretrained(vocab, do_lower=True)
         self.max_length = max_length + 1
         self.mode = split
         if self.mode == 'train':
-            self.cap_transform = train_transform
+            if self.cub_flag:
+                self.cap_transform = bird_train_transform # different transform for CUB
+            else:
+                self.cap_transform = train_transform
         else:
-            self.cap_transform = val_transform
+            if self.cub_flag:
+                self.cap_transform = bird_val_transform # different transform for CUB
+            else:
+                self.cap_transform = val_transform
         ######################################################################
         
 
@@ -358,6 +390,9 @@ class TextDataset(data.Dataset):
             caption, max_length=self.max_length, padding='max_length', 
             return_attention_mask=True, return_token_type_ids=False, truncation=True)
         s = np.array(caption_encoded['input_ids'])
+        if self.cub_flag:
+            sep_id = self.tokenizer.convert_tokens_to_ids(self.tokenizer._sep_token)
+            s[s == sep_id] = 0  # no need [SEP], replace it as [PAD] = 0
         s_mask = (1 - np.array(caption_encoded['attention_mask'])).astype(bool)
         #######################################
         sent_caption = np.asarray(self.captions[sent_ix]).astype('int64')

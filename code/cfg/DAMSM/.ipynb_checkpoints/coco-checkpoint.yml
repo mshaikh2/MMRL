@@ -1,0 +1,31 @@
+CONFIG_NAME: 'DAMSM'
+
+DATASET_NAME: 'coco'
+DATA_DIR: '../data/coco'
+GPU_ID: 0
+WORKERS: 0
+
+
+TREE:
+    BRANCH_NUM: 1
+    BASE_SIZE: 299
+
+
+TRAIN:
+    FLAG: True
+    NET_E: '../output/T_L1_TRX_coco_DAMSM_2020_10_09_12_24_07/Model/text_encoder10.pth'
+    BATCH_SIZE: 96
+    MAX_EPOCH: 600
+    SNAPSHOT_INTERVAL: 5
+    ENCODER_LR: 0.00026 # 0.0002best; 0.002good
+    RNN_GRAD_CLIP: 0.5
+    SMOOTH:
+        GAMMA1: 4.0  # 1,2,5 good 4 best  10&100bad
+        GAMMA2: 5.0
+        GAMMA3: 10.0  # 10good 1&100bad
+
+
+TEXT:
+    EMBEDDING_DIM: 256
+    CAPTIONS_PER_IMAGE: 5
+    WORDS_NUM: 15
