@@ -449,7 +449,7 @@ class condGANTrainer(object):
         now = datetime.datetime.now(dateutil.tz.tzlocal())
         timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
         #     LAMBDA_FT,LAMBDA_FI,LAMBDA_DAMSM=01,50,10
-        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-000001', timestamp)
+        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-0.01_0.1_101050', timestamp)
         mkdir_p(tb_dir)
         tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
 
@@ -663,9 +663,6 @@ class condGANTrainer(object):
                 # do not need to compute gradient for Ds
                 # self.set_requires_grad_value(netsD, False)
                 netG.zero_grad()
-                errG_total, G_logs = \
-                    generator_loss(netsD, fake_imgs, real_labels,
-                                   words_embs, sent_emb, match_labels, cap_lens, class_ids)
                 kl_loss = KL_loss(mu, logvar)
                 errG_total += kl_loss
                 G_logs += 'kl_loss: %.2f ' % kl_loss.item()

@@ -167,7 +167,7 @@ def main(config):
                                  sampler=sampler_val, drop_last=False, num_workers=config.num_workers)
 
     if os.path.exists(config.checkpoint):
-        print("Loading Checkpoint...")
+        print("Loading Checkpoint from %s..." % config.checkpoint)
         checkpoint = torch.load(config.checkpoint, map_location='cpu')
         model.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
