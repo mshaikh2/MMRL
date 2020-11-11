@@ -239,6 +239,7 @@ class condGANTrainer(object):
         return [text_encoder, image_encoder, netG, netsD, epoch, cap_model]
 
     def define_optimizers(self, image_encoder, text_encoder, netG, netsD, cap_model):
+        ### change the learning rate in this function ###
         
         #################################
         img_encoder_path = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
@@ -326,6 +327,15 @@ class condGANTrainer(object):
                 torch.load(cap_model_path, map_location='cpu')
             optimizerC.load_state_dict(state_dict['optimizer'])
             lr_schedulerC.load_state_dict(state_dict['lr_scheduler'])
+        
+        ####### change learning rate for each optimizer here ##########
+        optimizerI.param_groups[0]['lr'] = 1e-5
+        optimizerT.param_groups[0]['lr'] = 1e-5
+        optimizerC.param_groups[0]['lr'] = 1e-5
+        optimizerG.param_groups[0]['lr'] = 1e-5
+        for optim_d in optimizersD:
+            optim_d.param_groups[0]['lr'] = 1e-5
+        ###############################################################
 
         return (optimizerI
                 , optimizerT
@@ -449,7 +459,7 @@ class condGANTrainer(object):
         now = datetime.datetime.now(dateutil.tz.tzlocal())
         timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
         #     LAMBDA_FT,LAMBDA_FI,LAMBDA_DAMSM=01,50,10
-        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-011010', timestamp)
+        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-D_0101010101', timestamp)
         mkdir_p(tb_dir)
         tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
 
@@ -545,7 +555,13 @@ class condGANTrainer(object):
             c_total_loss = 0
             
             total_multimodal_loss = 0
-            #########################################
+            
+            ####### print out lr of each optimizer before training starts, make sure lrs are correct #########
+            print('Learning rates: lr_i %.7f, lr_t %.7f, lr_c %.7f, lr_g %.7f, lr_d0 %.7f, lr_d1 %.7f, lr_d2 %.7f' 
+                 % (optimizerI.param_groups[0]['lr'], optimizerT.param_groups[0]['lr'], 
+                    optimizerC.param_groups[0]['lr'], optimizerG.param_groups[0]['lr'], 
+                    optimizersD[0].param_groups[0]['lr'], optimizersD[1].param_groups[0]['lr'], optimizersD[2].param_groups[0]['lr'])) 
+            #########################################################################################
             
             start_t = time.time()
 
@@ -665,7 +681,7 @@ class condGANTrainer(object):
                 netG.zero_grad()
                 errG_total, G_logs = \
                     generator_loss(netsD, fake_imgs, real_labels,
-                                   words_embs, sent_emb, match_labels, cap_lens, class_ids)
+                                   words_embs, sent_emb_detached, match_labels, cap_lens, class_ids) # detached sent_emb_detached
                 kl_loss = KL_loss(mu, logvar)
                 errG_total += kl_loss
                 G_logs += 'kl_loss: %.2f ' % kl_loss.item()
@@ -873,6 +889,12 @@ class condGANTrainer(object):
                     #### validate ####
                     v_s_cur_loss, v_w_cur_loss, v_c_cur_loss = self.evaluate(image_encoder, text_encoder, 
                                                                         cap_model, self.val_batch_size)
+                    ### val losses ###
+                    tbw.add_scalar('Val_step/val_w_loss', float(v_w_cur_loss), tensorboard_step)
+                    tbw.add_scalar('Val_step/val_s_loss', float(v_s_cur_loss), tensorboard_step)
+                    tbw.add_scalar('Val_step/val_c_loss', float(v_c_cur_loss), tensorboard_step)
+
+
                     ### back to train ###
                     text_encoder.train()
                     image_encoder.train()
@@ -884,12 +906,7 @@ class condGANTrainer(object):
                     for i in range(len(netsD)):
                         netsD[i].train()
 
-                    ### val losses ###
-                    tbw.add_scalar('Val_step/val_w_loss', float(v_w_cur_loss), tensorboard_step)
-                    tbw.add_scalar('Val_step/val_s_loss', float(v_s_cur_loss), tensorboard_step)
-                    tbw.add_scalar('Val_step/val_c_loss', float(v_c_cur_loss), tensorboard_step)
-
-
+                    
                     tensorboard_step+=1
                     
                     #### save model update the files every 1000 iters within epoch 
