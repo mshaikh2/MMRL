@@ -29,10 +29,10 @@ TRAIN:
         GAMMA2: 5.0
         GAMMA3: 10.0  # 10good 1&100bad
         LAMBDA: 50.0
-        LAMBDA_GEN: 1.0
-        LAMBDA_CAP: 1.0 
-        LAMBDA_FT: 1.0 # low # order check
-        LAMBDA_FI: 1.0 # high        
+        LAMBDA_GEN: 0.0
+        LAMBDA_CAP: 0.0 
+        LAMBDA_FT: 0.0 # low # order check
+        LAMBDA_FI: 0.0 # high        
         LAMBDA_DAMSM: 1.0 # higher
 
 

@@ -330,11 +330,11 @@ class condGANTrainer(object):
         
         ####### change learning rate for each optimizer here ##########
         optimizerI.param_groups[0]['lr'] = 1e-5
-        optimizerT.param_groups[0]['lr'] = 1e-5
-        optimizerC.param_groups[0]['lr'] = 1e-5
-        optimizerG.param_groups[0]['lr'] = 1e-5
+        optimizerT.param_groups[0]['lr'] = 1e-6
+        optimizerC.param_groups[0]['lr'] = 1e-6
+        optimizerG.param_groups[0]['lr'] = 1e-6
         for optim_d in optimizersD:
-            optim_d.param_groups[0]['lr'] = 1e-5
+            optim_d.param_groups[0]['lr'] = 1e-6
         ###############################################################
 
         return (optimizerI
@@ -459,7 +459,7 @@ class condGANTrainer(object):
         now = datetime.datetime.now(dateutil.tz.tzlocal())
         timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
         #     LAMBDA_FT,LAMBDA_FI,LAMBDA_DAMSM=01,50,10
-        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-D_0101010101', timestamp)
+        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-00_00_00_00_01', timestamp)
         mkdir_p(tb_dir)
         tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
 
