@@ -173,6 +173,10 @@ def main(config):
         optimizer.load_state_dict(checkpoint['optimizer'])
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         config.start_epoch = checkpoint['epoch'] + 1
+        ## modify lr for optimizer and lr_sceduler here:
+        optimizer.param_groups[0]['lr'] = 1e-5
+        lr_scheduler.base_lrs[0] = 1e-5
+        lr_scheduler._last_lr[0] = 1e-5
     
     now = datetime.now(dateutil.tz.tzlocal())
     timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
@@ -182,10 +186,10 @@ def main(config):
     print("Start Training..")
     for epoch in range(config.start_epoch, config.epochs):
         
-#         print('\n=>Validation on COCO%s valset' % config.data_ver)
+#         print('\n=>Validation on CUB')
 #         start_time = timeit.default_timer()
 #         # validation
-#         validation_loss = evaluate(model, criterion, data_loader_val, device, epoch, tbw)
+#         validation_loss = evaluate(image_encoder, model, criterion, data_loader_val, device, epoch, tbw)
 #         tbw.add_scalar('Val/total_loss_epoch', validation_loss, epoch)
 #         stop_time = timeit.default_timer()
 #         print('[Epoch: %d, Val Loss: %.6f, Execution time: %.2f]' 

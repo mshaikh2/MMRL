@@ -163,6 +163,7 @@ def main(config):
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         config.start_epoch = checkpoint['epoch'] + 1
     
+    
     now = datetime.now(dateutil.tz.tzlocal())
     timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
     tb_dir = 'catr/tensorboard/{0}_{1}_{2}'.format('coco%s' % config.data_ver, config.prefix, timestamp)

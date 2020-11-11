@@ -127,7 +127,7 @@ if __name__ == "__main__":
     timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
 #     LAMBDA_FT,LAMBDA_FI,LAMBDA_DAMSM=01,50,10
     output_dir = '../output/%s_%s_%s' % \
-        (cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-0.01_0.1_101050', timestamp)
+        (cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-011010', timestamp)
 
     split_dir, bshuffle = 'train', True
     if not cfg.TRAIN.FLAG:

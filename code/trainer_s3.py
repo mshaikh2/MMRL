@@ -50,57 +50,57 @@ retokenizer = BertTokenizer.from_pretrained("catr/damsm_vocab.txt", do_lower=Tru
 # reg_tokenizer = RegexpTokenizer(r'\w+')
 frozen_list_image_encoder = ['Conv2d_1a_3x3','Conv2d_2a_3x3','Conv2d_2b_3x3','Conv2d_3b_1x1','Conv2d_4a_3x3']
 
-@torch.no_grad()
-def evaluate(cnn_model, trx_model, cap_model, batch_size, cap_criterion, dataloader_val):
-    cnn_model.eval()
-    trx_model.eval()
-    cap_model.eval() ### 
-    s_total_loss = 0
-    w_total_loss = 0
-    c_total_loss = 0 ###
-    ### add caption criterion here. #####
-#     cap_criterion = torch.nn.CrossEntropyLoss() # add caption criterion here
-    labels = torch.LongTensor(range(batch_size)) # used for matching loss
-    if cfg.CUDA:
-        labels = labels.cuda()
-#         cap_criterion = cap_criterion.cuda() # add caption criterion here
-#     cap_criterion.eval()
-    #####################################
+# @torch.no_grad()
+# def evaluate(cnn_model, trx_model, cap_model, batch_size, cap_criterion, dataloader_val):
+#     cnn_model.eval()
+#     trx_model.eval()
+#     cap_model.eval() ### 
+#     s_total_loss = 0
+#     w_total_loss = 0
+#     c_total_loss = 0 ###
+#     ### add caption criterion here. #####
+# #     cap_criterion = torch.nn.CrossEntropyLoss() # add caption criterion here
+#     labels = torch.LongTensor(range(batch_size)) # used for matching loss
+#     if cfg.CUDA:
+#         labels = labels.cuda()
+# #         cap_criterion = cap_criterion.cuda() # add caption criterion here
+# #     cap_criterion.eval()
+#     #####################################
 
-    val_data_iter = iter(dataloader_val)
-    for step in tqdm(range(len(val_data_iter)),leave=False):
-        data = val_data_iter.next()
+#     val_data_iter = iter(dataloader_val)
+#     for step in tqdm(range(len(val_data_iter)),leave=False):
+#         data = val_data_iter.next()
 
-        real_imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
+#         real_imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
 
-        words_features, sent_code = cnn_model(cap_imgs)
+#         words_features, sent_code = cnn_model(cap_imgs)
 
-        words_emb, sent_emb = trx_model(captions)
+#         words_emb, sent_emb = trx_model(captions)
 
-        ##### add catr here #####
-        cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
+#         ##### add catr here #####
+#         cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
 
-        cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
+#         cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
 
-        c_total_loss += cap_loss.item()
-        #########################
+#         c_total_loss += cap_loss.item()
+#         #########################
 
-        w_loss0, w_loss1, attn = words_loss(words_features, words_emb, labels,
-                                            cap_lens, class_ids, batch_size)
-        w_total_loss += (w_loss0 + w_loss1).item()
+#         w_loss0, w_loss1, attn = words_loss(words_features, words_emb, labels,
+#                                             cap_lens, class_ids, batch_size)
+#         w_total_loss += (w_loss0 + w_loss1).item()
 
-        s_loss0, s_loss1 = \
-            sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
-        s_total_loss += (s_loss0 + s_loss1).item()
+#         s_loss0, s_loss1 = \
+#             sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
+#         s_total_loss += (s_loss0 + s_loss1).item()
 
-#             if step == 50:
-#                 break
+# #             if step == 50:
+# #                 break
 
-    s_cur_loss = s_total_loss / step
-    w_cur_loss = w_total_loss / step
-    c_cur_loss = c_total_loss / step
+#     s_cur_loss = s_total_loss / step
+#     w_cur_loss = w_total_loss / step
+#     c_cur_loss = c_total_loss / step
 
-    return s_cur_loss, w_cur_loss, c_cur_loss
+#     return s_cur_loss, w_cur_loss, c_cur_loss
 
             
 # ################# Text to image task############################ #
@@ -449,7 +449,7 @@ class condGANTrainer(object):
         now = datetime.datetime.now(dateutil.tz.tzlocal())
         timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
         #     LAMBDA_FT,LAMBDA_FI,LAMBDA_DAMSM=01,50,10
-        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-0.01_0.1_101050', timestamp)
+        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-011010', timestamp)
         mkdir_p(tb_dir)
         tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
 
@@ -501,8 +501,8 @@ class condGANTrainer(object):
         if cfg.CUDA:
             labels = labels.cuda()
             noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
-#             cap_criterion = cap_criterion.cuda() # add caption criterion here
-#         cap_criterion.train()
+            cap_criterion = cap_criterion.cuda() # add caption criterion here
+        cap_criterion.train()
         #################################################
         
         tensorboard_step = 0
@@ -663,6 +663,9 @@ class condGANTrainer(object):
                 # do not need to compute gradient for Ds
                 # self.set_requires_grad_value(netsD, False)
                 netG.zero_grad()
+                errG_total, G_logs = \
+                    generator_loss(netsD, fake_imgs, real_labels,
+                                   words_embs, sent_emb, match_labels, cap_lens, class_ids)
                 kl_loss = KL_loss(mu, logvar)
                 errG_total += kl_loss
                 G_logs += 'kl_loss: %.2f ' % kl_loss.item()
@@ -868,17 +871,16 @@ class condGANTrainer(object):
                     tbw.add_scalar('train_multimodal_loss', float(total_multimodal_loss)/(step+1), tensorboard_step)
                     
                     #### validate ####
-                    v_s_cur_loss, v_w_cur_loss, v_c_cur_loss = evaluate(image_encoder, text_encoder, 
-                                                                        cap_model, self.val_batch_size, 
-                                                                        cap_criterion, self.dataloader_val)
+                    v_s_cur_loss, v_w_cur_loss, v_c_cur_loss = self.evaluate(image_encoder, text_encoder, 
+                                                                        cap_model, self.val_batch_size)
                     ### back to train ###
                     text_encoder.train()
                     image_encoder.train()
+                    netG.train()
+                    cap_model.train()
                     for k,v in image_encoder.named_children():
                         if k in frozen_list_image_encoder:
                             v.train(False)
-                    netG.train()
-                    cap_model.train()
                     for i in range(len(netsD)):
                         netsD[i].train()
 
@@ -895,9 +897,10 @@ class condGANTrainer(object):
                 
                 
 #             print('step:',step)
-            lr_schedulerC.step()
-            lr_schedulerI.step()
-            lr_schedulerT.step()
+            ######### no need to use lr_scheduler, keep lr constant ########
+#             lr_schedulerC.step()
+#             lr_schedulerI.step()
+#             lr_schedulerT.step()
             
             end_t = time.time()
             
@@ -924,57 +927,57 @@ class condGANTrainer(object):
 
         self.save_model(netG, avg_param_G, image_encoder, text_encoder, netsD, self.max_epoch, cap_model, optimizerC, optimizerI, optimizerT, lr_schedulerC, lr_schedulerI, lr_schedulerT, optimizerG, optimizersD)
 
-#     @torch.no_grad()
-#     def evaluate(self, cnn_model, trx_model, cap_model, batch_size):
-#         cnn_model.eval()
-#         trx_model.eval()
-#         cap_model.eval() ### 
-#         s_total_loss = 0
-#         w_total_loss = 0
-#         c_total_loss = 0 ###
-#         ### add caption criterion here. #####
-#         cap_criterion = torch.nn.CrossEntropyLoss() # add caption criterion here
-#         labels = Variable(torch.LongTensor(range(batch_size))) # used for matching loss
-#         if cfg.CUDA:
-#             labels = labels.cuda()
-#             cap_criterion = cap_criterion.cuda() # add caption criterion here
-#         cap_criterion.eval()
-#         #####################################
+    @torch.no_grad()
+    def evaluate(self, cnn_model, trx_model, cap_model, batch_size):
+        cnn_model.eval()
+        trx_model.eval()
+        cap_model.eval() ### 
+        s_total_loss = 0
+        w_total_loss = 0
+        c_total_loss = 0 ###
+        ### add caption criterion here. #####
+        cap_criterion = torch.nn.CrossEntropyLoss() # add caption criterion here
+        labels = Variable(torch.LongTensor(range(batch_size))) # used for matching loss
+        if cfg.CUDA:
+            labels = labels.cuda()
+            cap_criterion = cap_criterion.cuda() # add caption criterion here
+        cap_criterion.eval()
+        #####################################
         
-#         val_data_iter = iter(self.dataloader_val)
-#         for step in tqdm(range(len(val_data_iter)),leave=False):
-#             data = val_data_iter.next()
+        val_data_iter = iter(self.dataloader_val)
+        for step in tqdm(range(len(val_data_iter)),leave=False):
+            data = val_data_iter.next()
             
-#             real_imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
+            real_imgs, captions, cap_lens, class_ids, keys, cap_imgs, cap_img_masks, sentences, sent_masks = prepare_data(data)
             
-#             words_features, sent_code = cnn_model(cap_imgs)
+            words_features, sent_code = cnn_model(cap_imgs)
 
-#             words_emb, sent_emb = trx_model(captions)
+            words_emb, sent_emb = trx_model(captions)
             
-#             ##### add catr here #####
-#             cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
+            ##### add catr here #####
+            cap_preds = cap_model(words_features, cap_img_masks, sentences[:, :-1], sent_masks[:, :-1]) # caption model feedforward
 
-#             cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
+            cap_loss = caption_loss(cap_criterion, cap_preds, sentences)
 
-#             c_total_loss += cap_loss.data
-#             #########################
+            c_total_loss += cap_loss.data
+            #########################
 
-#             w_loss0, w_loss1, attn = words_loss(words_features, words_emb, labels,
-#                                                 cap_lens, class_ids, batch_size)
-#             w_total_loss += (w_loss0 + w_loss1).data
+            w_loss0, w_loss1, attn = words_loss(words_features, words_emb, labels,
+                                                cap_lens, class_ids, batch_size)
+            w_total_loss += (w_loss0 + w_loss1).data
 
-#             s_loss0, s_loss1 = \
-#                 sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
-#             s_total_loss += (s_loss0 + s_loss1).data
+            s_loss0, s_loss1 = \
+                sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
+            s_total_loss += (s_loss0 + s_loss1).data
 
-# #             if step == 50:
-# #                 break
+#             if step == 50:
+#                 break
 
-#         s_cur_loss = s_total_loss / step
-#         w_cur_loss = w_total_loss / step
-#         c_cur_loss = c_total_loss / step
+        s_cur_loss = s_total_loss / step
+        w_cur_loss = w_total_loss / step
+        c_cur_loss = c_total_loss / step
 
-#         return s_cur_loss, w_cur_loss, c_cur_loss
+        return s_cur_loss, w_cur_loss, c_cur_loss
         
         
     def save_singleimages(self, images, filenames, save_dir,

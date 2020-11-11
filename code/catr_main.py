@@ -9,6 +9,7 @@ import os
 from catr.models import utils, caption
 from catr.datasets import coco
 from catr.configuration import Config
+# from catr.cfg_damsm_bert import Config
 from catr.engine import train_one_epoch, evaluate
 
 
@@ -21,6 +22,7 @@ def main(config):
     np.random.seed(seed)
 
     model, criterion = caption.build_model(config)
+#     model, criterion = caption.build_model_v2(config)
     model.to(device)
 
     n_parameters = sum(p.numel()
@@ -57,7 +59,7 @@ def main(config):
                                  sampler=sampler_val, drop_last=False, num_workers=config.num_workers)
 
     if os.path.exists(config.checkpoint):
-        print("Loading Checkpoint...")
+        print("Loading Checkpoint %s..." % config.checkpoint)
         checkpoint = torch.load(config.checkpoint, map_location='cpu')
         model.load_state_dict(checkpoint['model'])
 #         optimizer.load_state_dict(checkpoint['optimizer'])
