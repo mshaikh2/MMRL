@@ -137,7 +137,10 @@ class condGANTrainer(object):
         img_encoder_path = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
         print('Load image encoder from:', img_encoder_path)
         state_dict = torch.load(img_encoder_path, map_location='cpu')
-        image_encoder.load_state_dict(state_dict['model'])
+        if 'model' in state_dict.keys():
+            image_encoder.load_state_dict(state_dict['model'])
+        else:
+            image_encoder.load_state_dict(state_dict)
         for p in image_encoder.parameters(): # make image encoder grad on
             p.requires_grad = True
         for k,v in image_encoder.named_children(): # freeze the layer1-5 (set eval for BNlayer)
@@ -158,7 +161,11 @@ class condGANTrainer(object):
 #         print('Load ', cfg.TRAIN.NET_E)
         print('Load text encoder from:', cfg.TRAIN.NET_E)
         state_dict = torch.load(cfg.TRAIN.NET_E,map_location='cpu')
-        text_encoder.load_state_dict(state_dict['model'])
+        
+        if 'model' in state_dict.keys():
+            text_encoder.load_state_dict(state_dict['model'])
+        else:
+            text_encoder.load_state_dict(state_dict)
         for p in text_encoder.parameters():
             p.requires_grad = True
         
@@ -197,7 +204,11 @@ class condGANTrainer(object):
         if cfg.TRAIN.NET_G != '':
             state_dict = \
                 torch.load(cfg.TRAIN.NET_G, map_location=lambda storage, loc: storage)
-            netG.load_state_dict(state_dict['model'])
+            if 'model' in state_dict.keys():
+                netG.load_state_dict(state_dict['model'])
+            else:
+                netG.load_state_dict(state_dict)
+                
             print('Load G from: ', cfg.TRAIN.NET_G)
             istart = cfg.TRAIN.NET_G.rfind('_') + 1
             iend = cfg.TRAIN.NET_G.rfind('.')
@@ -210,7 +221,11 @@ class condGANTrainer(object):
                     Dname = '%s/netD%d.pth' % (s_tmp, i)
                     print('Load D from: ', Dname)
                     state_dict = torch.load(Dname, map_location='cpu')
-                    netsD[i].load_state_dict(state_dict['model'])
+                    if 'model' in state_dict.keys():
+                        netsD[i].load_state_dict(state_dict['model'])
+                    else:
+                        netsD[i].load_state_dict(state_dict)
+                    
         # ########################################################## #
 #         config = Config()
         cap_model = caption.build_model_v3(config)
@@ -260,8 +275,9 @@ class condGANTrainer(object):
             print('Load image encoder optimizer from:', img_encoder_path)
             state_dict = \
                 torch.load(img_encoder_path, map_location='cpu')
-            optimizerI.load_state_dict(state_dict['optimizer'])
-            lr_schedulerI.load_state_dict(state_dict['lr_scheduler'])
+            
+#             optimizerI.load_state_dict(state_dict['optimizer'])
+#             lr_schedulerI.load_state_dict(state_dict['lr_scheduler'])
         #################################
         text_encoder_path = cfg.TRAIN.NET_E
         optimizerT = torch.optim.Adam(text_encoder.parameters()
@@ -273,8 +289,8 @@ class condGANTrainer(object):
         print('Load text encoder optimizer from:', cfg.TRAIN.NET_E)        
         if os.path.exists(cfg.TRAIN.NET_E):
             state_dict = torch.load(cfg.TRAIN.NET_E,map_location='cpu')
-            optimizerT.load_state_dict(state_dict['optimizer'])
-            lr_schedulerT.load_state_dict(state_dict['lr_scheduler'])
+#             optimizerT.load_state_dict(state_dict['optimizer'])
+#             lr_schedulerT.load_state_dict(state_dict['lr_scheduler'])
         
             
         
@@ -291,7 +307,7 @@ class condGANTrainer(object):
                 opt = optim.Adam(netsD[i].parameters(),
                                  lr=cfg.TRAIN.DISCRIMINATOR_LR,
                                  betas=(0.5, 0.999))
-                opt.load_state_dict(state_dict['optimizer'])
+#                 opt.load_state_dict(state_dict['optimizer'])
                 optimizersD.append(opt)
             
             
@@ -303,7 +319,7 @@ class condGANTrainer(object):
             print('Load Generator optimizer from:',cfg.TRAIN.NET_G)
             state_dict = \
                 torch.load(cfg.TRAIN.NET_G, map_location='cpu')
-            optimizerG.load_state_dict(state_dict['optimizer'])
+#             optimizerG.load_state_dict(state_dict['optimizer'])
 #             lr_schedulerC.load_state_dict(state_dict['lr_scheduler'])
         # ################## CAPTION model here ################# #
         param_dicts = [
@@ -325,11 +341,11 @@ class condGANTrainer(object):
             print('Load text encoder optimizer from:',cap_model_path)
             state_dict = \
                 torch.load(cap_model_path, map_location='cpu')
-            optimizerC.load_state_dict(state_dict['optimizer'])
-            lr_schedulerC.load_state_dict(state_dict['lr_scheduler'])
+#             optimizerC.load_state_dict(state_dict['optimizer'])
+#             lr_schedulerC.load_state_dict(state_dict['lr_scheduler'])
         
         ####### change learning rate for each optimizer here ##########
-        optimizerI.param_groups[0]['lr'] = 1e-5
+        optimizerI.param_groups[0]['lr'] = 1e-6
         optimizerT.param_groups[0]['lr'] = 1e-6
         optimizerC.param_groups[0]['lr'] = 1e-6
         optimizerG.param_groups[0]['lr'] = 1e-6
@@ -459,7 +475,7 @@ class condGANTrainer(object):
         now = datetime.datetime.now(dateutil.tz.tzlocal())
         timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
         #     LAMBDA_FT,LAMBDA_FI,LAMBDA_DAMSM=01,50,10
-        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-00_00_00_00_01', timestamp)
+        tb_dir = '../tensorboard/{0}_{1}_{2}'.format(cfg.DATASET_NAME, cfg.CONFIG_NAME+'-s3-01_01_01_01_50', timestamp)
         mkdir_p(tb_dir)
         tbw = SummaryWriter(log_dir=tb_dir) # Tensorboard logging
 
